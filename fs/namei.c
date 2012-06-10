@@ -493,9 +493,9 @@ err_root:
 	return -ECHILD;
 }
 
-static inline int d_revalidate(struct dentry *dentry, struct nameidata *nd)
+static inline int d_revalidate(struct dentry *dentry, unsigned int flags)
 {
-	return dentry->d_op->d_revalidate(dentry, nd ? nd->flags : 0);
+	return dentry->d_op->d_revalidate(dentry, flags);
 }
 
 /**
@@ -541,7 +541,7 @@ static int complete_walk(struct nameidata *nd)
 		return 0;
 
 	/* Note: we do not d_invalidate() */
-	status = d_revalidate(dentry, nd);
+	status = d_revalidate(dentry, nd->flags);
 	if (status > 0)
 		return 0;
 
@@ -1098,7 +1098,7 @@ static struct dentry *lookup_dcache(struct qstr *name, struct dentry *dir,
 		if (d_need_lookup(dentry)) {
 			*need_lookup = true;
 		} else if (dentry->d_flags & DCACHE_OP_REVALIDATE) {
-			error = d_revalidate(dentry, nd);
+			error = d_revalidate(dentry, nd ? nd->flags : 0);
 			if (unlikely(error <= 0)) {
 				if (error < 0) {
 					dput(dentry);
@@ -1206,7 +1206,7 @@ static int lookup_fast(struct nameidata *nd, struct qstr *name,
 		if (unlikely(d_need_lookup(dentry)))
 			goto unlazy;
 		if (unlikely(dentry->d_flags & DCACHE_OP_REVALIDATE)) {
-			status = d_revalidate(dentry, nd);
+			status = d_revalidate(dentry, nd->flags);
 			if (unlikely(status <= 0)) {
 				if (status != -ECHILD)
 					need_reval = 0;
@@ -1236,7 +1236,7 @@ unlazy:
 	}
 
 	if (unlikely(dentry->d_flags & DCACHE_OP_REVALIDATE) && need_reval)
-		status = d_revalidate(dentry, nd);
+		status = d_revalidate(dentry, nd->flags);
 	if (unlikely(status <= 0)) {
 		if (status < 0) {
 			dput(dentry);
