@@ -26,7 +26,7 @@
  *          0: tell VFS to invalidate dentry
  *          1: dentry is valid
  */
-static int sdcardfs_d_revalidate(struct dentry *dentry, struct nameidata *nd)
+static int sdcardfs_d_revalidate(struct dentry *dentry, unsigned int flags)
 {
 	int err = 1;
 	struct path parent_lower_path, lower_path;
@@ -37,7 +37,7 @@ static int sdcardfs_d_revalidate(struct dentry *dentry, struct nameidata *nd)
 	struct inode *inode;
 	struct sdcardfs_inode_data *data;
 
-	if (nd && nd->flags & LOOKUP_RCU)
+	if (flags & LOOKUP_RCU)
 		return -ECHILD;
 
 	spin_lock(&dentry->d_lock);
@@ -62,15 +62,9 @@ static int sdcardfs_d_revalidate(struct dentry *dentry, struct nameidata *nd)
 	lower_cur_parent_dentry = dget_parent(lower_dentry);
 
 	if ((lower_dentry->d_flags & DCACHE_OP_REVALIDATE)) {
-		struct path ptmp;
-		if (nd) {
-			pathcpy(&ptmp, &nd->path);
-			pathcpy(&nd->path, &lower_path);
-		}
-		err = lower_dentry->d_op->d_revalidate(lower_dentry, nd);
-		if (nd)
-			pathcpy(&nd->path, &ptmp);
+		err = lower_dentry->d_op->d_revalidate(lower_dentry, flags);
 		if (err == 0) {
+			d_drop(dentry);
 			goto out;
 		}
 	}
@@ -78,12 +72,14 @@ static int sdcardfs_d_revalidate(struct dentry *dentry, struct nameidata *nd)
 	spin_lock(&lower_dentry->d_lock);
 	if (d_unhashed(lower_dentry)) {
 		spin_unlock(&lower_dentry->d_lock);
+		d_drop(dentry);
 		err = 0;
 		goto out;
 	}
 	spin_unlock(&lower_dentry->d_lock);
 
 	if (parent_lower_dentry != lower_cur_parent_dentry) {
+		d_drop(dentry);
 		err = 0;
 		goto out;
 	}
@@ -97,6 +93,7 @@ static int sdcardfs_d_revalidate(struct dentry *dentry, struct nameidata *nd)
 	}
 
 	if (!qstr_case_eq(&dentry->d_name, &lower_dentry->d_name)) {
+		__d_drop(dentry);
 		err = 0;
 	}
 
@@ -115,6 +112,7 @@ static int sdcardfs_d_revalidate(struct dentry *dentry, struct nameidata *nd)
 	if (inode) {
 		data = top_data_get(SDCARDFS_I(inode));
 		if (!data || data->abandoned) {
+			d_drop(dentry);
 			err = 0;
 		}
 		if (data)
