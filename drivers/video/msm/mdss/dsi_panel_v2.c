@@ -371,7 +371,7 @@ static int dsi_panel_parse_phy(struct platform_device *pdev,
 		return -EINVAL;
 	}
 	for (i = 0; i < len; i++)
-		panel_private->phy_params.regulator[i] = data[i];
+		panel_data->panel_info.mipi.dsi_phy_db.regulator[i] = data[i];
 
 	data = of_get_property(np, "qcom,panel-phy-timingSettings", &len);
 	if ((!data) || (len != 12)) {
@@ -380,7 +380,7 @@ static int dsi_panel_parse_phy(struct platform_device *pdev,
 		return -EINVAL;
 	}
 	for (i = 0; i < len; i++)
-		panel_private->phy_params.timing[i] = data[i];
+		panel_data->panel_info.mipi.dsi_phy_db.timing[i] = data[i];
 
 	data = of_get_property(np, "qcom,panel-phy-strengthCtrl", &len);
 	if ((!data) || (len != 2)) {
@@ -388,8 +388,8 @@ static int dsi_panel_parse_phy(struct platform_device *pdev,
 			__func__, __LINE__);
 		return -EINVAL;
 	}
-	panel_private->phy_params.strength[0] = data[0];
-	panel_private->phy_params.strength[1] = data[1];
+	panel_data->panel_info.mipi.dsi_phy_db.strength[0] = data[0];
+	panel_data->panel_info.mipi.dsi_phy_db.strength[1] = data[1];
 
 	data = of_get_property(np, "qcom,panel-phy-bistCtrl", &len);
 	if ((!data) || (len != 6)) {
@@ -398,7 +398,7 @@ static int dsi_panel_parse_phy(struct platform_device *pdev,
 		return -EINVAL;
 	}
 	for (i = 0; i < len; i++)
-		panel_private->phy_params.bistCtrl[i] = data[i];
+		panel_data->panel_info.mipi.dsi_phy_db.bistctrl[i] = data[i];
 
 	data = of_get_property(np, "qcom,panel-phy-laneConfig", &len);
 	if ((!data) || (len != 30)) {
@@ -407,9 +407,8 @@ static int dsi_panel_parse_phy(struct platform_device *pdev,
 		return -EINVAL;
 	}
 	for (i = 0; i < len; i++)
-		panel_private->phy_params.laneCfg[i] = data[i];
+		panel_data->panel_info.mipi.dsi_phy_db.lanecfg[i] = data[i];
 
-	panel_data->panel_info.mipi.dsi_phy_db = &panel_private->phy_params;
 	return 0;
 }
 

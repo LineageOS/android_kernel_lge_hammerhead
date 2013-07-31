@@ -294,16 +294,6 @@ struct dsi_kickoff_action {
 	void *data;
 };
 
-struct mdss_panel_common_pdata {
-	struct mdss_panel_info panel_info;
-	int (*on) (struct mdss_panel_data *pdata);
-	int (*off) (struct mdss_panel_data *pdata);
-	void (*bl_fnc) (struct mdss_panel_data *pdata, u32 bl_level);
-
-	struct dsi_panel_cmds on_cmds;
-	struct dsi_panel_cmds off_cmds;
-};
-
 struct dsi_drv_cm_data {
 	struct regulator *vdd_vreg;
 	struct regulator *vdd_io_vreg;
@@ -368,7 +358,7 @@ struct mdss_dsi_ctrl_pdata {
 };
 
 int dsi_panel_device_register(struct platform_device *pdev,
-			      struct mdss_panel_common_pdata *panel_data);
+			      struct mdss_dsi_ctrl_pdata *ctrl_pdata);
 
 char *mdss_dsi_buf_reserve_hdr(struct dsi_buf *dp, int hlen);
 char *mdss_dsi_buf_init(struct dsi_buf *dp);

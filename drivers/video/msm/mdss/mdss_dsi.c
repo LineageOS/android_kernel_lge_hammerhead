@@ -964,31 +964,31 @@ int mdss_dsi_retrieve_ctrl_resources(struct platform_device *pdev, int mode,
 
 
 int dsi_panel_device_register(struct platform_device *pdev,
-			      struct mdss_panel_common_pdata *panel_data)
+			      struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
 	struct mipi_panel_info *mipi;
 	int rc;
 	u8 lanes = 0, bpp;
 	u32 h_period, v_period, dsi_pclk_rate;
-	struct mdss_dsi_ctrl_pdata *ctrl_pdata;
 	struct device_node *dsi_ctrl_np = NULL;
 	struct platform_device *ctrl_pdev = NULL;
+	struct mdss_panel_info *pinfo = &(ctrl_pdata->panel_data.panel_info);
 	bool broadcast;
 	bool cont_splash_enabled = false;
 
-	h_period = ((panel_data->panel_info.lcdc.h_pulse_width)
-			+ (panel_data->panel_info.lcdc.h_back_porch)
-			+ (panel_data->panel_info.xres)
-			+ (panel_data->panel_info.lcdc.h_front_porch));
+	h_period = ((pinfo->lcdc.h_pulse_width)
+			+ (pinfo->lcdc.h_back_porch)
+			+ (pinfo->xres)
+			+ (pinfo->lcdc.h_front_porch));
 
-	v_period = ((panel_data->panel_info.lcdc.v_pulse_width)
-			+ (panel_data->panel_info.lcdc.v_back_porch)
-			+ (panel_data->panel_info.yres)
-			+ (panel_data->panel_info.lcdc.v_front_porch));
+	v_period = ((pinfo->lcdc.v_pulse_width)
+			+ (pinfo->lcdc.v_back_porch)
+			+ (pinfo->yres)
+			+ (pinfo->lcdc.v_front_porch));
 
-	mipi  = &panel_data->panel_info.mipi;
+	mipi  = &(pinfo->mipi);
 
-	panel_data->panel_info.type =
+	pinfo->type =
 		((mipi->mode == DSI_VIDEO_MODE)
 			? MIPI_VIDEO_PANEL : MIPI_CMD_PANEL);
 
@@ -1012,22 +1012,22 @@ int dsi_panel_device_register(struct platform_device *pdev,
 	else
 		bpp = 3;		/* Default format set to RGB888 */
 
-	if (!panel_data->panel_info.clk_rate) {
-		h_period += panel_data->panel_info.lcdc.xres_pad;
-		v_period += panel_data->panel_info.lcdc.yres_pad;
+	if (!pinfo->clk_rate) {
+		h_period += pinfo->lcdc.xres_pad;
+		v_period += pinfo->lcdc.yres_pad;
 
 		if (lanes > 0) {
-			panel_data->panel_info.clk_rate =
+			pinfo->clk_rate =
 			((h_period * v_period * (mipi->frame_rate) * bpp * 8)
 			   / lanes);
 		} else {
 			pr_err("%s: forcing mdss_dsi lanes to 1\n", __func__);
-			panel_data->panel_info.clk_rate =
+			pinfo->clk_rate =
 				(h_period * v_period
 					 * (mipi->frame_rate) * bpp * 8);
 		}
 	}
-	pll_divider_config.clk_rate = panel_data->panel_info.clk_rate;
+	pll_divider_config.clk_rate = pinfo->clk_rate;
 
 	rc = mdss_dsi_clk_div_config(bpp, lanes, &dsi_pclk_rate);
 	if (rc) {
@@ -1047,11 +1047,6 @@ int dsi_panel_device_register(struct platform_device *pdev,
 	}
 
 	ctrl_pdev = of_find_device_by_node(dsi_ctrl_np);
-	ctrl_pdata = platform_get_drvdata(ctrl_pdev);
-	if (!ctrl_pdata) {
-		pr_err("%s: no dsi ctrl driver data\n", __func__);
-		return -EINVAL;
-	}
 
 	rc = mdss_dsi_regulator_init(ctrl_pdev);
 	if (rc) {
@@ -1143,27 +1138,13 @@ int dsi_panel_device_register(struct platform_device *pdev,
 	}
 
 	if (mdss_dsi_retrieve_ctrl_resources(ctrl_pdev,
-					     panel_data->panel_info.pdest,
+					     pinfo->pdest,
 					     ctrl_pdata)) {
 		pr_err("%s: unable to get Dsi controller res\n", __func__);
 		return -EPERM;
 	}
 
 	ctrl_pdata->panel_data.event_handler = mdss_dsi_event_handler;
-
-	ctrl_pdata->on_cmds = panel_data->on_cmds;
-	ctrl_pdata->off_cmds = panel_data->off_cmds;
-
-	memcpy(&((ctrl_pdata->panel_data).panel_info),
-				&(panel_data->panel_info),
-				       sizeof(struct mdss_panel_info));
-
-	ctrl_pdata->panel_data.set_backlight = panel_data->bl_fnc;
-	ctrl_pdata->bklt_ctrl = panel_data->panel_info.bklt_ctrl;
-	ctrl_pdata->pwm_pmic_gpio = panel_data->panel_info.pwm_pmic_gpio;
-	ctrl_pdata->pwm_period = panel_data->panel_info.pwm_period;
-	ctrl_pdata->pwm_lpg_chan = panel_data->panel_info.pwm_lpg_chan;
-	ctrl_pdata->bklt_max = panel_data->panel_info.bl_max;
 
 	if (ctrl_pdata->bklt_ctrl == BL_PWM)
 		mdss_dsi_panel_pwm_cfg(ctrl_pdata);
@@ -1174,7 +1155,7 @@ int dsi_panel_device_register(struct platform_device *pdev,
 	 */
 
 	ctrl_pdata->pclk_rate = dsi_pclk_rate;
-	ctrl_pdata->byte_clk_rate = panel_data->panel_info.clk_rate / 8;
+	ctrl_pdata->byte_clk_rate = pinfo->clk_rate / 8;
 	pr_debug("%s: pclk=%d, bclk=%d\n", __func__,
 			ctrl_pdata->pclk_rate, ctrl_pdata->byte_clk_rate);
 
@@ -1213,10 +1194,7 @@ int dsi_panel_device_register(struct platform_device *pdev,
 		return rc;
 	}
 
-	ctrl_pdata->on = panel_data->on;
-	ctrl_pdata->off = panel_data->off;
-
-	if (panel_data->panel_info.pdest == DISPLAY_1) {
+	if (pinfo->pdest == DISPLAY_1) {
 		mdss_debug_register_base("dsi0",
 			ctrl_pdata->ctrl_base, ctrl_pdata->reg_size);
 		ctrl_pdata->ndx = 0;
