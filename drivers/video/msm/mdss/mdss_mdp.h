@@ -277,6 +277,7 @@ struct mdss_ad_info {
 	char __iomem *base;
 	u8 num;
 	u32 sts;
+	u32 ops;
 	u32 state;
 	u32 ad_data;
 	u32 ad_data_mode;
