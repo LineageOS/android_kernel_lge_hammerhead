@@ -249,8 +249,8 @@ struct mdss_pp_res_type {
 	struct mdp_gamut_cfg_data gamut_disp_cfg[MDSS_BLOCK_DISP_NUM];
 	uint16_t gamut_tbl[MDSS_BLOCK_DISP_NUM][GAMUT_TOTAL_TABLE_SIZE];
 	u32 hist_data[MDSS_BLOCK_DISP_NUM][HIST_V_SIZE];
-	/* physical info */
 	struct pp_sts_type pp_disp_sts[MDSS_BLOCK_DISP_NUM];
+	/* physical info */
 	struct pp_hist_col_info dspp_hist[MDSS_MDP_MAX_DSPP];
 };
 
@@ -303,6 +303,9 @@ static void pp_ad_init_write(struct mdss_ad_info *ad);
 static void pp_ad_input_write(struct mdss_ad_info *ad, u32 bl_lvl);
 static int mdss_mdp_ad_setup(struct msm_fb_data_type *mfd);
 static void pp_ad_cfg_lut(char __iomem *offset, u32 *data);
+static int pp_num_to_side(struct mdss_mdp_ctl *ctl, u32 num);
+static inline bool pp_sts_is_enabled(u32 sts, int side);
+static inline void pp_sts_set_split_bits(u32 *sts, u32 bits);
 
 static u32 last_sts, last_state;
 
@@ -434,6 +437,7 @@ static void pp_gamut_config(struct mdp_gamut_cfg_data *gamut_cfg,
 		pp_sts->gamut_sts &= ~PP_STS_ENABLE;
 	else if (gamut_cfg->flags & MDP_PP_OPS_ENABLE)
 		pp_sts->gamut_sts |= PP_STS_ENABLE;
+	pp_sts_set_split_bits(&pp_sts->gamut_sts, gamut_cfg->flags);
 }
 
 static void pp_pa_config(unsigned long flags, u32 base,
@@ -454,6 +458,7 @@ static void pp_pa_config(unsigned long flags, u32 base,
 			pp_sts->pa_sts &= ~PP_STS_ENABLE;
 		else if (pa_config->flags & MDP_PP_OPS_ENABLE)
 			pp_sts->pa_sts |= PP_STS_ENABLE;
+		pp_sts_set_split_bits(&pp_sts->pa_sts, pa_config->flags);
 	}
 }
 
@@ -469,6 +474,7 @@ static void pp_pcc_config(unsigned long flags, u32 base,
 			pp_sts->pcc_sts &= ~PP_STS_ENABLE;
 		else if (pcc_config->ops & MDP_PP_OPS_ENABLE)
 			pp_sts->pcc_sts |= PP_STS_ENABLE;
+		pp_sts_set_split_bits(&pp_sts->pcc_sts, pcc_config->ops);
 	}
 }
 
@@ -496,6 +502,7 @@ static void pp_igc_config(unsigned long flags, u32 base,
 			pp_sts->igc_sts &= ~PP_STS_ENABLE;
 		else if (igc_config->ops & MDP_PP_OPS_ENABLE)
 			pp_sts->igc_sts |= PP_STS_ENABLE;
+		pp_sts_set_split_bits(&pp_sts->igc_sts, igc_config->ops);
 	}
 }
 
@@ -984,7 +991,7 @@ static int pp_dspp_setup(u32 disp_num, struct mdss_mdp_mixer *mixer)
 	struct pp_sts_type *pp_sts;
 	u32 data;
 	char __iomem *basel;
-	int i, ret = 0;
+	int i, ret = 0, side;
 	struct mdss_data_type *mdata;
 	struct mdss_mdp_ctl *ctl;
 	u32 mixer_cnt;
@@ -995,6 +1002,7 @@ static int pp_dspp_setup(u32 disp_num, struct mdss_mdp_mixer *mixer)
 	ctl = mixer->ctl;
 	mdata = ctl->mdata;
 	dspp_num = mixer->num;
+
 	/* no corresponding dspp */
 	if ((mixer->type != MDSS_MDP_MIXER_TYPE_INTF) ||
 		(dspp_num >= MDSS_MDP_MAX_DSPP))
@@ -1043,28 +1051,14 @@ static int pp_dspp_setup(u32 disp_num, struct mdss_mdp_mixer *mixer)
 	pp_enhist_config(flags, basel + MDSS_MDP_REG_DSPP_HIST_LUT_BASE,
 			pp_sts, &mdss_pp_res->enhist_disp_cfg[disp_num]);
 
-	if (pp_sts->pa_sts & PP_STS_ENABLE)
-		opmode |= (1 << 20); /* PA_EN */
-
-	if (pp_sts->pcc_sts & PP_STS_ENABLE)
-		opmode |= (1 << 4); /* PCC_EN */
-
-	if (pp_sts->igc_sts & PP_STS_ENABLE) {
-		opmode |= (1 << 0) | /* IGC_LUT_EN */
-			      (pp_sts->igc_tbl_idx << 1);
-	}
-
-	if (pp_sts->enhist_sts & PP_STS_ENABLE) {
-		opmode |= (1 << 19) | /* HIST_LUT_EN */
-				  (1 << 20); /* PA_EN */
-		if (!(pp_sts->pa_sts & PP_STS_ENABLE)) {
-			/* Program default value */
-			offset = base + MDSS_MDP_REG_DSPP_PA_BASE;
-			MDSS_MDP_REG_WRITE(offset, 0);
-			MDSS_MDP_REG_WRITE(offset + 4, 0);
-			MDSS_MDP_REG_WRITE(offset + 8, 0);
-			MDSS_MDP_REG_WRITE(offset + 12, 0);
-		}
+	if (pp_sts->enhist_sts & PP_STS_ENABLE &&
+			!(pp_sts->pa_sts & PP_STS_ENABLE)) {
+		/* Program default value */
+		addr = base + MDSS_MDP_REG_DSPP_PA_BASE;
+		writel_relaxed(0, addr);
+		writel_relaxed(0, addr + 4);
+		writel_relaxed(0, addr + 8);
+		writel_relaxed(0, addr + 12);
 	}
 	if (flags & PP_FLAGS_DIRTY_DITHER) {
 		dither_cfg = &mdss_pp_res->dither_disp_cfg[disp_num];
@@ -1088,17 +1082,11 @@ static int pp_dspp_setup(u32 disp_num, struct mdss_mdp_mixer *mixer)
 			pp_sts->dither_sts &= ~PP_STS_ENABLE;
 		else if (dither_cfg->flags & MDP_PP_OPS_ENABLE)
 			pp_sts->dither_sts |= PP_STS_ENABLE;
+		pp_sts_set_split_bits(&pp_sts->dither_sts, dither_cfg->flags);
 	}
-	if (pp_sts->dither_sts & PP_STS_ENABLE)
-		opmode |= (1 << 8); /* DITHER_EN */
 	if (flags & PP_FLAGS_DIRTY_GAMUT)
 		pp_gamut_config(&mdss_pp_res->gamut_disp_cfg[disp_num], base,
 				pp_sts);
-	if (pp_sts->gamut_sts & PP_STS_ENABLE) {
-		opmode |= (1 << 23); /* GAMUT_EN */
-		if (pp_sts->gamut_sts & PP_STS_GAMUT_FIRST)
-			opmode |= (1 << 24); /* GAMUT_ORDER */
-	}
 
 	if (flags & PP_FLAGS_DIRTY_PGC) {
 		pgc_config = &mdss_pp_res->pgc_disp_cfg[disp_num];
@@ -1110,9 +1098,35 @@ static int pp_dspp_setup(u32 disp_num, struct mdss_mdp_mixer *mixer)
 			pp_sts->pgc_sts &= ~PP_STS_ENABLE;
 		else if (pgc_config->flags & MDP_PP_OPS_ENABLE)
 			pp_sts->pgc_sts |= PP_STS_ENABLE;
+		pp_sts_set_split_bits(&pp_sts->pgc_sts, pgc_config->flags);
 	}
-	if (pp_sts->pgc_sts & PP_STS_ENABLE)
-		opmode |= (1 << 22);
+
+	side = pp_num_to_side(ctl, dspp_num);
+	if (side >= 0) {
+		if (pp_sts_is_enabled(pp_sts->pa_sts, side))
+			opmode |= (1 << 20); /* PA_EN */
+
+		if (pp_sts_is_enabled(pp_sts->pcc_sts, side))
+			opmode |= (1 << 4); /* PCC_EN */
+
+		if (pp_sts_is_enabled(pp_sts->igc_sts, side)) {
+			opmode |= (1 << 0) | /* IGC_LUT_EN */
+			      (pp_sts->igc_tbl_idx << 1);
+		}
+		if (pp_sts->enhist_sts & PP_STS_ENABLE) {
+			opmode |= (1 << 19) | /* HIST_LUT_EN */
+					 (1 << 20); /* PA_EN */
+		}
+		if (pp_sts_is_enabled(pp_sts->dither_sts, side))
+			opmode |= (1 << 8); /* DITHER_EN */
+		if (pp_sts_is_enabled(pp_sts->gamut_sts, side)) {
+			opmode |= (1 << 23); /* GAMUT_EN */
+			if (pp_sts->gamut_sts & PP_STS_GAMUT_FIRST)
+				opmode |= (1 << 24); /* GAMUT_ORDER */
+		}
+		if (pp_sts_is_enabled(pp_sts->pgc_sts, side))
+			opmode |= (1 << 22);
+	}
 
 flush_exit:
 	writel_relaxed(opmode, basel + MDSS_MDP_REG_DSPP_OP_MODE);
@@ -1507,6 +1521,11 @@ int mdss_mdp_pcc_config(struct mdp_pcc_cfg_data *config,
 		(config->block >= MDP_BLOCK_MAX))
 		return -EINVAL;
 
+	if ((config->ops & MDSS_PP_SPLIT_MASK) == MDSS_PP_SPLIT_MASK) {
+		pr_warn("Can't set both split bits\n");
+		return -EINVAL;
+	}
+
 	mutex_lock(&mdss_pp_mutex);
 	disp_num = config->block - MDP_LOGICAL_BLOCK_DISP_0;
 
@@ -1623,6 +1642,11 @@ int mdss_mdp_igc_lut_config(struct mdp_igc_lut_data *config,
 
 	if (config->len != IGC_LUT_ENTRIES)
 		return -EINVAL;
+
+	if ((config->ops & MDSS_PP_SPLIT_MASK) == MDSS_PP_SPLIT_MASK) {
+		pr_warn("Can't set both split bits\n");
+		return -EINVAL;
+	}
 
 	mutex_lock(&mdss_pp_mutex);
 	disp_num = config->block - MDP_LOGICAL_BLOCK_DISP_0;
@@ -1820,6 +1844,11 @@ int mdss_mdp_argc_config(struct mdp_pgc_lut_data *config,
 		(PP_BLOCK(config->block) >= MDP_BLOCK_MAX))
 		return -EINVAL;
 
+	if ((config->flags & MDSS_PP_SPLIT_MASK) == MDSS_PP_SPLIT_MASK) {
+		pr_warn("Can't set both split bits\n");
+		return -EINVAL;
+	}
+
 	mutex_lock(&mdss_pp_mutex);
 
 	disp_num = PP_BLOCK(config->block) - MDP_LOGICAL_BLOCK_DISP_0;
@@ -1990,6 +2019,11 @@ int mdss_mdp_dither_config(struct mdp_dither_cfg_data *config,
 	if (config->flags & MDP_PP_OPS_READ)
 		return -ENOTSUPP;
 
+	if ((config->flags & MDSS_PP_SPLIT_MASK) == MDSS_PP_SPLIT_MASK) {
+		pr_warn("Can't set both split bits\n");
+		return -EINVAL;
+	}
+
 	mutex_lock(&mdss_pp_mutex);
 	disp_num = config->block - MDP_LOGICAL_BLOCK_DISP_0;
 	mdss_pp_res->dither_disp_cfg[disp_num] = *config;
@@ -2038,6 +2072,11 @@ int mdss_mdp_gamut_config(struct mdp_gamut_cfg_data *config,
 
 	if (pp_gm_has_invalid_lut_size(config))
 		return -EINVAL;
+
+	if ((config->flags & MDSS_PP_SPLIT_MASK) == MDSS_PP_SPLIT_MASK) {
+		pr_warn("Can't set both split bits\n");
+		return -EINVAL;
+	}
 
 	mutex_lock(&mdss_pp_mutex);
 	disp_num = config->block - MDP_LOGICAL_BLOCK_DISP_0;
@@ -2790,11 +2829,16 @@ int mdss_mdp_ad_config(struct msm_fb_data_type *mfd,
 	struct mdss_ad_info *ad;
 	struct mdss_mdp_ctl *ctl;
 	int lin_ret = -1, inv_ret = -1, ret = 0;
-	u32 ratio_temp, shift = 0;
+	u32 ratio_temp, shift = 0, last_ops;
 
 	ret = mdss_mdp_get_ad(mfd, &ad);
 	if (ret)
 		return ret;
+
+	if ((init_cfg->ops & MDSS_PP_SPLIT_MASK) == MDSS_PP_SPLIT_MASK) {
+		pr_warn("Can't set both split bits\n");
+		return -EINVAL;
+	}
 
 	mutex_lock(&ad->lock);
 	if (init_cfg->ops & MDP_PP_AD_INIT) {
@@ -2834,6 +2878,21 @@ int mdss_mdp_ad_config(struct msm_fb_data_type *mfd,
 		ad->cfg.backlight_scale = mfd->panel_info->bl_max;
 		ad->sts |= PP_AD_STS_DIRTY_CFG;
 	}
+
+	last_ops = ad->ops & MDSS_PP_SPLIT_MASK;
+	ad->ops = init_cfg->ops & MDSS_PP_SPLIT_MASK;
+	/*
+	 *  if there is a change in the split mode config, the init values
+	 *  need to be re-written to hardware (if they have already been
+	 *  written or if there is data pending to be written). Check for
+	 *  pending data (DIRTY_INIT) is not checked here since it will not
+	 *  affect the outcome of this conditional (i.e. if init hasn't
+	 *  already been written (*_STATE_INIT is set), this conditional will
+	 *  only evaluate to true (and set the DIRTY bit) if the DIRTY bit has
+	 *  already been set).
+	 */
+	if ((last_ops ^ ad->ops) && (ad->state & PP_AD_STATE_INIT))
+		ad->sts |= PP_AD_STS_DIRTY_INIT;
 
 	if (!ret && (init_cfg->ops & MDP_PP_OPS_DISABLE)) {
 		ad->sts &= ~PP_STS_ENABLE;
@@ -2969,6 +3028,9 @@ static void pp_ad_init_write(struct mdss_ad_info *ad)
 {
 	u32 temp;
 	char __iomem *base = ad->base;
+	int side;
+	bool split_mode = !!(ad->ops & MDSS_PP_SPLIT_MASK);
+
 	writel_relaxed(ad->init.i_control[0] & 0x1F,
 				base + MDSS_MDP_REG_AD_CON_CTRL_0);
 	writel_relaxed(ad->init.i_control[1] << 8,
@@ -2993,7 +3055,10 @@ static void pp_ad_init_write(struct mdss_ad_info *ad)
 	writel_relaxed(ad->init.format, base + MDSS_MDP_REG_AD_CTRL_0);
 	writel_relaxed(ad->init.auto_size, base + MDSS_MDP_REG_AD_CTRL_1);
 
-	temp = ad->init.frame_w << 16;
+	if (split_mode)
+		temp = mdata->mixer_intf[ad_hw->num].width << 16;
+	else
+		temp = ad->init.frame_w << 16;
 	temp |= ad->init.frame_h & 0xFFFF;
 	writel_relaxed(temp, base + MDSS_MDP_REG_AD_FRAME_SIZE);
 
@@ -3290,6 +3355,7 @@ int mdss_mdp_ad_addr_setup(struct mdss_data_type *mdata, u32 *ad_off)
 	for (i = 0; i < mdata->nad_cfgs; i++) {
 		mdata->ad_cfgs[i].base = mdata->mdp_base + ad_off[i];
 		mdata->ad_cfgs[i].num = i;
+		mdata->ad_cfgs[i].ops = 0;
 		mdata->ad_cfgs[i].calc_itr = 0;
 		mdata->ad_cfgs[i].last_str = 0xFFFFFFFF;
 		mutex_init(&mdata->ad_cfgs[i].lock);
@@ -3298,6 +3364,51 @@ int mdss_mdp_ad_addr_setup(struct mdss_data_type *mdata, u32 *ad_off)
 		INIT_WORK(&mdata->ad_cfgs[i].calc_work, pp_ad_calc_worker);
 	}
 	return rc;
+}
+
+static inline void pp_sts_set_split_bits(u32 *sts, u32 bits)
+{
+	u32 tmp = *sts;
+	tmp &= ~MDSS_PP_SPLIT_MASK;
+	tmp |= bits & MDSS_PP_SPLIT_MASK;
+	*sts = tmp;
+}
+
+static int pp_num_to_side(struct mdss_mdp_ctl *ctl, u32 num)
+{
+	u32 mixer_id[MDSS_MDP_INTF_MAX_LAYERMIXER];
+	u32 mixer_num;
+	if (!ctl || !ctl->mfd)
+		return -EINVAL;
+	mixer_num = mdss_mdp_get_ctl_mixers(ctl->mfd->index, mixer_id);
+	if (mixer_num < 2)
+		return MDSS_SIDE_NONE;
+	else if (mixer_id[1] == num)
+		return MDSS_SIDE_RIGHT;
+	else if (mixer_id[0] == num)
+		return MDSS_SIDE_LEFT;
+	else
+		pr_err("invalid, not on any side");
+	return -EINVAL;
+}
+
+static inline bool pp_sts_is_enabled(u32 sts, int side)
+{
+	bool ret = false;
+	/*
+	 * If there are no sides, or if there are no split mode bits set, the
+	 * side can't be disabled via split mode.
+	 *
+	 * Otherwise, if the side being checked opposes the split mode
+	 * configuration, the side is disabled.
+	 */
+	if ((side == MDSS_SIDE_NONE) || !(sts & MDSS_PP_SPLIT_MASK))
+		ret = true;
+	else if ((sts & MDSS_PP_SPLIT_RIGHT_ONLY) && (side == MDSS_SIDE_RIGHT))
+		ret = true;
+	else if ((sts & MDSS_PP_SPLIT_LEFT_ONLY) && (side == MDSS_SIDE_LEFT))
+		ret = true;
+	return ret && (sts & PP_STS_ENABLE);
 }
 
 static int is_valid_calib_addr(void *addr)
