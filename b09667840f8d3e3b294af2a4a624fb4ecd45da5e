@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "7af24918_feaf3692",
+        "filename": "drivers/cpufreq/cpufreq_interactive.c",
+        "patchSetId": 1
+      },
+      "lineNbr": 1051,
+      "author": {
+        "id": 9180
+      },
+      "writtenOn": "2014-04-13T08:39:40Z",
+      "side": 1,
+      "message": "tunables is undeclared;\nmaybe you just meant to set boostpulse_endtime?",
+      "revId": "b09667840f8d3e3b294af2a4a624fb4ecd45da5e",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
+      "unresolved": false
+    }
+  ]
+}
