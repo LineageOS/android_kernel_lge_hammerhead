@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "3afc51ec_6269d28b",
+        "filename": "drivers/video/msm/mdss/mdss_mdp_pp.c",
+        "patchSetId": 1
+      },
+      "lineNbr": 1355,
+      "author": {
+        "id": 32
+      },
+      "writtenOn": "2014-05-04T11:24:15Z",
+      "side": 1,
+      "message": "Please format using tabs in the kernel.",
+      "revId": "5ab300d2bc9a683c499256e7e518d80d1b12be8c",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
+      "unresolved": false
+    }
+  ]
+}
