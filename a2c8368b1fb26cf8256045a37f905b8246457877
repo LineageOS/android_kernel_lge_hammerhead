@@ -16,6 +16,24 @@
       "revId": "a2c8368b1fb26cf8256045a37f905b8246457877",
       "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
       "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "ba0121b8_353c272f",
+        "filename": "drivers/video/msm/mdss/mdss_mdp_hwio.h",
+        "patchSetId": 4
+      },
+      "lineNbr": 23,
+      "author": {
+        "id": 1053
+      },
+      "writtenOn": "2014-06-18T07:23:34Z",
+      "side": 1,
+      "message": "Why?\n\nIt was moved to this file:\nhttp://review.cyanogenmod.org/#/c/65647/4/include/linux/msm_mdp.h",
+      "parentUuid": "ba0121b8_d52a0be7",
+      "revId": "a2c8368b1fb26cf8256045a37f905b8246457877",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
+      "unresolved": false
     }
   ]
 }
