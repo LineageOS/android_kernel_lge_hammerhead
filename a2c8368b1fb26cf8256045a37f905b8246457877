@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "ba0121b8_d52a0be7",
+        "filename": "drivers/video/msm/mdss/mdss_mdp_hwio.h",
+        "patchSetId": 4
+      },
+      "lineNbr": 23,
+      "author": {
+        "id": 2134
+      },
+      "writtenOn": "2014-06-18T07:12:43Z",
+      "side": 1,
+      "message": "These lines don\u0027t be deleted:\n#define MDSS_MDP_HW_REV_100»       »       0x10000000\n#define MDSS_MDP_HW_REV_102»       »       0x10020000\n#define MDSS_MDP_HW_REV_103»       »       0x10030000",
+      "revId": "a2c8368b1fb26cf8256045a37f905b8246457877",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
+      "unresolved": false
+    }
+  ]
+}
