@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "9a061dce_d7779d00",
+        "filename": "arch/arm/mach-msm/simple_plug.c",
+        "patchSetId": 1
+      },
+      "lineNbr": 16,
+      "author": {
+        "id": 7254
+      },
+      "writtenOn": "2014-08-01T15:10:43Z",
+      "side": 1,
+      "message": "early suspend is deprecated, no need to include this",
+      "revId": "cd8fae30ab27a341673d8d7dd552ec30684e8236",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
+      "unresolved": false
+    }
+  ]
+}
