@@ -16,6 +16,24 @@
       "revId": "9e1ec30590a5b7eb45a50d477e8c4578ce049191",
       "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
       "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "9a061dce_f97e13ad",
+        "filename": "drivers/cpufreq/cpufreq_interactive.c",
+        "patchSetId": 1
+      },
+      "lineNbr": 431,
+      "author": {
+        "id": 6315
+      },
+      "writtenOn": "2014-08-04T08:58:59Z",
+      "side": 1,
+      "message": "It is interactive\u0027s concept that we stop at highspeed freq, right?\n\nMy (obvious but a little bit anal) fixes only adressed possible irritations to the timer routine when using the external cpu-boost driver. I would always prefer to keep it as close to default as possible.",
+      "parentUuid": "9a061dce_797203e7",
+      "revId": "9e1ec30590a5b7eb45a50d477e8c4578ce049191",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
+      "unresolved": false
     }
   ]
 }
