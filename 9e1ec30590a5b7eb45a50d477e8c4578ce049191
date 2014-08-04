@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "9a061dce_797203e7",
+        "filename": "drivers/cpufreq/cpufreq_interactive.c",
+        "patchSetId": 1
+      },
+      "lineNbr": 431,
+      "author": {
+        "id": 6351
+      },
+      "writtenOn": "2014-08-04T08:45:25Z",
+      "side": 1,
+      "message": "Is go_hispeed at all useful now?  Isn\u0027t it just adding one extra step when you really want to ramp up to max speed fast?\n\nIf we start at 300mhz @ 100% load then we\u0027ll hit go_hispeed which will then stop at hispeed_freq for one sampling period before it scales all the way up.",
+      "revId": "9e1ec30590a5b7eb45a50d477e8c4578ce049191",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
+      "unresolved": false
+    }
+  ]
+}
