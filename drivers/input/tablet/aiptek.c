@@ -1820,7 +1820,7 @@ aiptek_probe(struct usb_interface *intf, const struct usb_device_id *id)
 			"interface has %d endpoints, but must have minimum 1\n",
 			intf->altsetting[0].desc.bNumEndpoints);
 		err = -EINVAL;
-		goto fail2;
+		goto fail3;
 	}
 	endpoint = &intf->altsetting[0].endpoint[0].desc;
 
