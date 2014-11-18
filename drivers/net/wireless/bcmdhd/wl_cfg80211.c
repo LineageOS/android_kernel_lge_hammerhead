@@ -554,6 +554,8 @@ static wl_scan_params_t *wl_cfg80211_scan_alloc_params(int channel,
 	int nprobes, int *out_params_size);
 static bool check_dev_role_integrity(struct wl_priv *wl, u32 dev_role);
 
+static void wl_send_event(struct net_device *dev, uint32 event_type, uint32 status, uint32 reason);
+
 /*
  * Some external functions, TODO: move them to dhd_linux.h
  */
@@ -3188,6 +3190,7 @@ wl_cfg80211_connect(struct wiphy *wiphy, struct net_device *dev,
 	bcm_tlv_t *wpa2_ie;
 	u8* wpaie  = 0;
 	u32 wpaie_len = 0;
+	u32 timeout;
 	u32 chan_cnt = 0;
 	struct ether_addr bssid;
 	s32 bssidx;
@@ -3261,13 +3264,12 @@ wl_cfg80211_connect(struct wiphy *wiphy, struct net_device *dev,
 			}
 		} else
 			WL_DBG(("Currently not associated!\n"));
-	} else {
-		/* if status is DISCONNECTING, wait for disconnection terminated max 500 ms */
-		wait_cnt = 500/10;
-		while (wl_get_drv_status(wl, DISCONNECTING, dev) && wait_cnt) {
-			WL_DBG(("Waiting for disconnection terminated, wait_cnt: %d\n", wait_cnt));
-			wait_cnt--;
-			OSL_SLEEP(10);
+	} else if (wl_get_drv_status(wl, DISCONNECTING, dev)) {
+		timeout = wait_event_interruptible_timeout(wl->event_sync_wq,
+					!wl_get_drv_status(wl, DISCONNECTING, dev),
+					msecs_to_jiffies(MAX_WAIT_TIME/3));
+		if 	(timeout <= 0 || wl_get_drv_status(wl, DISCONNECTING, dev)) {
+			WL_ERR(("timeout in waiting disconnect event\n"));
 		}
 	}
 
@@ -3489,15 +3491,22 @@ wl_cfg80211_disconnect(struct wiphy *wiphy, struct net_device *dev,
 		}
 #endif /* ESCAN_RESULT_PATCH */
 		wl_set_drv_status(wl, DISCONNECTING, dev);
-		scbval.val = reason_code;
-		memcpy(&scbval.ea, curbssid, ETHER_ADDR_LEN);
-		scbval.val = htod32(scbval.val);
-		err = wldev_ioctl(dev, WLC_DISASSOC, &scbval,
-			sizeof(scb_val_t), true);
-		if (unlikely(err)) {
-			wl_clr_drv_status(wl, DISCONNECTING, dev);
-			WL_ERR(("error (%d)\n", err));
-			return err;
+		if (wl_get_drv_status(wl, CONNECTING, dev)) {
+			/* in case of associating status, this will abort assoc procedure */
+			wl_notify_escan_complete(wl, dev, false, true);
+			/* send pseudo connection failure event */
+			wl_send_event(dev, WLC_E_SET_SSID, WLC_E_STATUS_ABORT, 0);
+		} else {
+			scbval.val = reason_code;
+			memcpy(&scbval.ea, curbssid, ETHER_ADDR_LEN);
+			scbval.val = htod32(scbval.val);
+			err = wldev_ioctl(dev, WLC_DISASSOC, &scbval,
+				sizeof(scb_val_t), true);
+			if (unlikely(err)) {
+				wl_clr_drv_status(wl, DISCONNECTING, dev);
+				WL_ERR(("error (%d)\n", err));
+				return err;
+			}
 		}
 	}
 
@@ -7366,10 +7375,10 @@ wl_notify_connect_status(struct wl_priv *wl, bcm_struct_cfgdev *cfgdev,
 				/* WLAN_REASON_UNSPECIFIED is used for hang up event in Android */
 				reason = (reason == WLAN_REASON_UNSPECIFIED)? 0 : reason;
 
-				printk("link down if %s may call cfg80211_disconnected. "
+				WL_ERR(("link down if %s may call cfg80211_disconnected. "
 					"event : %d, reason=%d from " MACDBG "\n",
 					ndev->name, event, ntoh32(e->reason),
-					MAC2STRDBG((u8*)(&e->addr)));
+					MAC2STRDBG((u8*)(&e->addr))));
 				if (memcmp(curbssid, &e->addr, ETHER_ADDR_LEN) != 0) {
 					WL_ERR(("BSSID of event is not the connected BSSID"
 						"(ignore it) cur: " MACDBG " event: " MACDBG"\n",
@@ -7377,7 +7386,7 @@ wl_notify_connect_status(struct wl_priv *wl, bcm_struct_cfgdev *cfgdev,
 					return 0;
 				}
 				wl_clr_drv_status(wl, CONNECTED, ndev);
-				if (! wl_get_drv_status(wl, DISCONNECTING, ndev)) {
+				if (!wl_get_drv_status(wl, DISCONNECTING, ndev)) {
 					/* To make sure disconnect, explictly send dissassoc
 					*  for BSSID 00:00:00:00:00:00 issue
 					*/
@@ -7394,18 +7403,19 @@ wl_notify_connect_status(struct wl_priv *wl, bcm_struct_cfgdev *cfgdev,
 					cfg80211_disconnected(ndev, reason, NULL, 0, GFP_KERNEL);
 					wl_link_down(wl);
 					wl_init_prof(wl, ndev);
+				} else {
+					wl_clr_drv_status(wl, DISCONNECTING, ndev);
 				}
-			}
-			else if (wl_get_drv_status(wl, CONNECTING, ndev)) {
-
-				printk("link down, during connecting\n");
+			} else if (wl_get_drv_status(wl, CONNECTING, ndev)) {
+				WL_ERR(("link down, during connecting\n"));
 #ifdef ESCAN_RESULT_PATCH
 				if ((memcmp(connect_req_bssid, broad_bssid, ETHER_ADDR_LEN) == 0) ||
 					(memcmp(&e->addr, broad_bssid, ETHER_ADDR_LEN) == 0) ||
 					(memcmp(&e->addr, connect_req_bssid, ETHER_ADDR_LEN) == 0))
 					/* In case this event comes while associating another AP */
 #endif /* ESCAN_RESULT_PATCH */
-					wl_bss_connect_done(wl, ndev, e, data, false);
+					if (!wl_get_drv_status(wl, DISCONNECTING, ndev))
+						wl_bss_connect_done(wl, ndev, e, data, false);
 			}
 			wl_clr_drv_status(wl, DISCONNECTING, ndev);
 
@@ -7414,8 +7424,8 @@ wl_notify_connect_status(struct wl_priv *wl, bcm_struct_cfgdev *cfgdev,
 				complete(&wl->iface_disable);
 
 		} else if (wl_is_nonetwork(wl, e)) {
-			printk("connect failed event=%d e->status %d e->reason %d \n",
-				event, (int)ntoh32(e->status), (int)ntoh32(e->reason));
+			WL_ERR(("connect failed event=%d e->status %d e->reason %d\n",
+				event, (int)ntoh32(e->status), (int)ntoh32(e->reason)));
 			/* Clean up any pending scan request */
 			if (wl->scan_request) {
 				if (wl->escan_on) {
@@ -7425,8 +7435,11 @@ wl_notify_connect_status(struct wl_priv *wl, bcm_struct_cfgdev *cfgdev,
 					wl_iscan_aborted(wl);
 				}
 			}
-			if (wl_get_drv_status(wl, CONNECTING, ndev))
+			if (wl_get_drv_status(wl, CONNECTING, ndev) &&
+				!wl_get_drv_status(wl, DISCONNECTING, ndev))
 				wl_bss_connect_done(wl, ndev, e, data, false);
+			wl_clr_drv_status(wl, DISCONNECTING, ndev);
+			wl_clr_drv_status(wl, CONNECTING, ndev);
 		} else {
 			printk("%s nothing\n", __FUNCTION__);
 		}
@@ -8873,6 +8886,16 @@ static void wl_init_iscan_handler(struct wl_iscan_ctrl *iscan)
 	iscan->iscan_handler[WL_SCAN_RESULTS_NO_MEM] = wl_iscan_aborted;
 }
 
+static void wl_send_event(struct net_device *dev, uint32 event_type,
+				uint32 status, uint32 reason)
+{
+	wl_event_msg_t msg;
+	bzero(&msg, sizeof(wl_event_msg_t));
+	msg.event_type = hton32(event_type);
+	msg.status = hton32(status);
+	msg.reason = hton32(reason);
+	wl_cfg80211_event(dev, &msg, NULL);
+}
 static s32
 wl_cfg80211_netdev_notifier_call(struct notifier_block * nb,
 	unsigned long state,
@@ -9411,103 +9434,106 @@ static s32 wl_notifier_change_state(struct wl_priv *wl, struct net_info *_net_in
 	WL_DBG(("Enter state %d set %d _net_info->pm_restore %d iface %s\n",
 		state, set, _net_info->pm_restore, _net_info->ndev->name));
 
-	if (state != WL_STATUS_CONNECTED)
-		return 0;
 	mode = wl_get_mode_by_netdev(wl, _net_info->ndev);
 	if (set) {
-		wl_cfg80211_concurrent_roam(wl, 1);
+		if (state == WL_STATUS_CONNECTED) {
+			wl_cfg80211_concurrent_roam(wl, 1);
 
-		if (mode == WL_MODE_AP) {
+			if (mode == WL_MODE_AP) {
+				if (wl_add_remove_eventmsg(primary_dev, WLC_E_P2P_PROBREQ_MSG, false))
+					WL_ERR((" failed to unset WLC_E_P2P_PROPREQ_MSG\n"));
+			}
 
-			if (wl_add_remove_eventmsg(primary_dev, WLC_E_P2P_PROBREQ_MSG, false))
-				WL_ERR((" failed to unset WLC_E_P2P_PROPREQ_MSG\n"));
-		}
-		wl_cfg80211_determine_vsdb_mode(wl);
-		if (wl->vsdb_mode || _net_info->pm_block) {
-			if (wl->pm_enable_work_on) {
-				cancel_delayed_work_sync(&wl->pm_enable_work);
-				wl->pm_enable_work_on = false;
-			}
-			/* save PM_FAST in _net_info to restore this
-			 * if _net_info->pm_block is false
-			 */
-			if (!_net_info->pm_block && (mode == WL_MODE_BSS)) {
-				_net_info->pm = PM_FAST;
-				_net_info->pm_restore = true;
-			}
-			pm = PM_OFF;
-			for_each_ndev(wl, iter, next) {
-				if (iter->pm_restore)
-					continue;
-				/* Save the current power mode */
-				err = wldev_ioctl(iter->ndev, WLC_GET_PM, &iter->pm,
-					sizeof(iter->pm), false);
-				WL_DBG(("%s:power save %s\n", iter->ndev->name,
-					iter->pm ? "enabled" : "disabled"));
-				if (!err && iter->pm) {
-					iter->pm_restore = true;
+			wl_cfg80211_determine_vsdb_mode(wl);
+			if (wl->vsdb_mode || _net_info->pm_block) {
+				if (wl->pm_enable_work_on) {
+					cancel_delayed_work_sync(&wl->pm_enable_work);
+					wl->pm_enable_work_on = false;
 				}
-
-			}
-			for_each_ndev(wl, iter, next) {
-				if ((err = wldev_ioctl(iter->ndev, WLC_SET_PM, &pm,
-					sizeof(pm), true)) != 0) {
-					if (err == -ENODEV)
-						WL_DBG(("%s:netdev not ready\n", iter->ndev->name));
-					else
-						WL_ERR(("%s:error (%d)\n", iter->ndev->name, err));
-				} else
-					iter->ndev->ieee80211_ptr->ps = false;
-			}
-		} else {
-			/* add PM Enable timer to go to power save mode
-			 * if supplicant control pm mode, it will be cleared or
-			 * updated by wl_cfg80211_set_power_mgmt() if not - for static IP & HW4 P2P,
-			 * PM will be configured when timer expired
-			 */
-
-			/*
-			 * before calling pm_enable_timer, we need to set PM -1 for all ndev
-			 */
-			pm = PM_OFF;
-
-			for_each_ndev(wl, iter, next) {
-				if ((err = wldev_ioctl(iter->ndev, WLC_SET_PM, &pm,
-					sizeof(pm), true)) != 0) {
-					if (err == -ENODEV)
-						WL_DBG(("%s:netdev not ready\n", iter->ndev->name));
-					else
-						WL_ERR(("%s:error (%d)\n", iter->ndev->name, err));
+				/* save PM_FAST in _net_info to restore this
+				 * if _net_info->pm_block is false
+				 */
+				if (!_net_info->pm_block && (mode == WL_MODE_BSS)) {
+					_net_info->pm = PM_FAST;
+					_net_info->pm_restore = true;
 				}
-			}
-			wl->pm_enable_work_on = true;
-			schedule_delayed_work(&wl->pm_enable_work,
-				msecs_to_jiffies(WL_PM_ENABLE_TIMEOUT));
-		}
-	}
-	 else { /* clear */
-		chan = 0;
-		/* clear chan information when the net device is disconnected */
-		wl_update_prof(wl, _net_info->ndev, NULL, &chan, WL_PROF_CHAN);
-		wl_cfg80211_determine_vsdb_mode(wl);
-		for_each_ndev(wl, iter, next) {
-			if (iter->pm_restore && iter->pm) {
-				WL_DBG(("%s:restoring power save %s\n",
-					iter->ndev->name, (iter->pm ? "enabled" : "disabled")));
-				err = wldev_ioctl(iter->ndev,
-					WLC_SET_PM, &iter->pm, sizeof(iter->pm), true);
-				if (unlikely(err)) {
-					if (err == -ENODEV)
-						WL_DBG(("%s:netdev not ready\n", iter->ndev->name));
-					else
-						WL_ERR(("%s:error(%d)\n", iter->ndev->name, err));
-					break;
+				pm = PM_OFF;
+				for_each_ndev(wl, iter, next) {
+					if (iter->pm_restore)
+						continue;
+					/* Save the current power mode */
+					err = wldev_ioctl(iter->ndev, WLC_GET_PM, &iter->pm,
+							sizeof(iter->pm), false);
+					WL_DBG(("%s:power save %s\n", iter->ndev->name,
+								iter->pm ? "enabled" : "disabled"));
+					if (!err && iter->pm) {
+						iter->pm_restore = true;
+					}
 				}
-				iter->pm_restore = 0;
-				iter->ndev->ieee80211_ptr->ps = true;
+				for_each_ndev(wl, iter, next) {
+					if ((err = wldev_ioctl(iter->ndev, WLC_SET_PM, &pm,
+									sizeof(pm), true)) != 0) {
+						if (err == -ENODEV)
+							WL_DBG(("%s:netdev not ready\n", iter->ndev->name));
+						else
+							WL_ERR(("%s:error (%d)\n", iter->ndev->name, err));
+					} else {
+						iter->ndev->ieee80211_ptr->ps = false;
+					}
+				}
+			} else {
+				/* add PM Enable timer to go to power save mode
+				 * if supplicant control pm mode, it will be cleared or
+				 * updated by wl_cfg80211_set_power_mgmt() if not - for static IP & HW4 P2P,
+				 * PM will be configured when timer expired
+				 */
+
+				/*
+				 * before calling pm_enable_timer, we need to set PM -1 for all ndev
+				 */
+				pm = PM_OFF;
+
+				for_each_ndev(wl, iter, next) {
+					if ((err = wldev_ioctl(iter->ndev, WLC_SET_PM, &pm,
+						sizeof(pm), true)) != 0) {
+						if (err == -ENODEV)
+							WL_DBG(("%s:netdev not ready\n", iter->ndev->name));
+						else
+							WL_ERR(("%s:error (%d)\n", iter->ndev->name, err));
+					}
+				}
+				wl->pm_enable_work_on = true;
+				schedule_delayed_work(&wl->pm_enable_work,
+					msecs_to_jiffies(WL_PM_ENABLE_TIMEOUT));
 			}
 		}
-		wl_cfg80211_concurrent_roam(wl, 0);
+	} else { /* clear */
+		if (state == WL_STATUS_CONNECTED) {
+			chan = 0;
+			/* clear chan information when the net device is disconnected */
+			wl_update_prof(wl, _net_info->ndev, NULL, &chan, WL_PROF_CHAN);
+			wl_cfg80211_determine_vsdb_mode(wl);
+			for_each_ndev(wl, iter, next) {
+				if (iter->pm_restore && iter->pm) {
+					WL_DBG(("%s:restoring power save %s\n",
+							iter->ndev->name, (iter->pm ? "enabled" : "disabled")));
+					err = wldev_ioctl(iter->ndev, WLC_SET_PM, &iter->pm,
+								sizeof(iter->pm), true);
+					if (unlikely(err)) {
+						if (err == -ENODEV)
+							WL_DBG(("%s:netdev not ready\n", iter->ndev->name));
+						else
+							WL_ERR(("%s:error(%d)\n", iter->ndev->name, err));
+						break;
+					}
+					iter->pm_restore = 0;
+					iter->ndev->ieee80211_ptr->ps = true;
+				}
+			}
+			wl_cfg80211_concurrent_roam(wl, 0);
+		} else if (state == WL_STATUS_DISCONNECTING) {
+			wake_up_interruptible(&wl->event_sync_wq);
+		}
 	}
 	return err;
 }
@@ -9564,9 +9590,11 @@ static s32 wl_init_priv(struct wl_priv *wl)
 	wl->roamoff_on_concurrent = true;
 	/* register interested state */
 	set_bit(WL_STATUS_CONNECTED, &wl->interrested_state);
+	set_bit(WL_STATUS_DISCONNECTING, &wl->interrested_state);
 	spin_lock_init(&wl->cfgdrv_lock);
 	mutex_init(&wl->ioctl_buf_sync);
 	init_waitqueue_head(&wl->netif_change_event);
+	init_waitqueue_head(&wl->event_sync_wq);
 	init_completion(&wl->send_af_done);
 	init_completion(&wl->iface_disable);
 	wl_init_eq(wl);
