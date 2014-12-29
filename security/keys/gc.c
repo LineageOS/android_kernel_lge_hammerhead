@@ -193,6 +193,8 @@ static noinline void key_gc_unused_keys(struct list_head *keys)
 		    key->type->destroy)
 			key->type->destroy(key);
 
+		key_user_put(key->user);
+
 		security_key_free(key);
 
 		/* deal with the user's key tracking and quota */
@@ -206,8 +208,6 @@ static noinline void key_gc_unused_keys(struct list_head *keys)
 		atomic_dec(&key->user->nkeys);
 		if (test_bit(KEY_FLAG_INSTANTIATED, &key->flags))
 			atomic_dec(&key->user->nikeys);
-
-		key_user_put(key->user);
 
 		kfree(key->description);
 
