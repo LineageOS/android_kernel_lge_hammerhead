@@ -82,7 +82,7 @@ static int __add_to_swap_cache(struct page *page, swp_entry_t entry)
 	error = radix_tree_insert(&swapper_space.page_tree, entry.val, page);
 	if (likely(!error)) {
 		total_swapcache_pages++;
-		__inc_zone_page_state(page, NR_FILE_PAGES);
+		__inc_zone_page_state(page, NR_SWAPCACHE);
 		INC_CACHE_INFO(add_total);
 	}
 	spin_unlock_irq(&swapper_space.tree_lock);
@@ -129,7 +129,7 @@ void __delete_from_swap_cache(struct page *page)
 	set_page_private(page, 0);
 	ClearPageSwapCache(page);
 	total_swapcache_pages--;
-	__dec_zone_page_state(page, NR_FILE_PAGES);
+	__dec_zone_page_state(page, NR_SWAPCACHE);
 	INC_CACHE_INFO(del_total);
 }
 
