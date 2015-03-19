@@ -16,6 +16,24 @@
       "revId": "855d5689908d08c444045fce420f300f1e475e1f",
       "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
       "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "5ac665da_9ae1d9d3",
+        "filename": "drivers/video/msm/mdss/mdss_dsi_panel.c",
+        "patchSetId": 1
+      },
+      "lineNbr": 154,
+      "author": {
+        "id": 6315
+      },
+      "writtenOn": "2015-03-19T06:22:29Z",
+      "side": 1,
+      "message": "Probably yes. As this stuff doesn\u0027t work at all atm, I didn\u0027t bother to look into details.\n\nI saw you took this to the n3 and maybe lm3630 has something useful for us as well.",
+      "parentUuid": "5ac665da_7af17dcd",
+      "revId": "855d5689908d08c444045fce420f300f1e475e1f",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
+      "unresolved": false
     }
   ]
 }
