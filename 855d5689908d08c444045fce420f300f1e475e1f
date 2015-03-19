@@ -51,6 +51,24 @@
       "revId": "855d5689908d08c444045fce420f300f1e475e1f",
       "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
       "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "5ac665da_eed5aeb9",
+        "filename": "drivers/video/msm/mdss/mdss_dsi_panel.c",
+        "patchSetId": 1
+      },
+      "lineNbr": 584,
+      "author": {
+        "id": 6315
+      },
+      "writtenOn": "2015-03-19T12:41:05Z",
+      "side": 1,
+      "message": "No go even with a commented \"on\" sequence. Tested various delays as well as those \"blank\" sequences before/after each sequence that appear in our dtsi.",
+      "parentUuid": "5ac665da_ee5e4e75",
+      "revId": "855d5689908d08c444045fce420f300f1e475e1f",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
+      "unresolved": false
     }
   ]
 }
