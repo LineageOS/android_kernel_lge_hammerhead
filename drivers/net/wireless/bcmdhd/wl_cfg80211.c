@@ -1177,7 +1177,7 @@ wl_cfg80211_add_virtual_iface(struct wiphy *wiphy,
 		WL_ERR(("name is NULL\n"));
 		return NULL;
 	}
-	if (wl->p2p_supported && (wlif_type != -1)) {
+	if (wl_cfgp2p_check_enabled(wl) && (wlif_type != -1)) {
 		ASSERT(wl->p2p); /* ensure expectation of p2p initialization */
 		if (wl_get_p2p_status(wl, IF_DELETING)) {
 			/* wait till IF_DEL is complete
@@ -1366,7 +1366,7 @@ wl_cfg80211_del_virtual_iface(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev)
 		WL_ERR(("Find p2p index from ndev(%p) failed\n", dev));
 		return BCME_ERROR;
 	}
-	if (wl->p2p_supported) {
+	if (wl_cfgp2p_check_enabled(wl)) {
 		memcpy(p2p_mac.octet, wl->p2p->int_addr.octet, ETHER_ADDR_LEN);
 
 		/* Clear GO_NEG_PHASE bit to take care of GO-NEG-FAIL cases
@@ -1491,7 +1491,7 @@ wl_cfg80211_change_virtual_iface(struct wiphy *wiphy, struct net_device *ndev,
 		return -EINVAL;
 	if (ap) {
 		wl_set_mode_by_netdev(wl, ndev, mode);
-		if (wl->p2p_supported && wl->p2p->vif_created) {
+		if (wl_cfgp2p_check_enabled(wl) && wl->p2p->vif_created) {
 			WL_DBG(("p2p_vif_created (%d) p2p_on (%d)\n", wl->p2p->vif_created,
 			p2p_on(wl)));
 			wldev_iovar_setint(ndev, "mpc", 0);
@@ -1560,7 +1560,7 @@ wl_cfg80211_notify_ifadd(struct net_device *ndev, s32 idx, s32 bssidx,
 		WL_ERR(("net is NULL\n"));
 		return 0;
 	}
-	if (wl->p2p_supported && wl_get_p2p_status(wl, IF_ADD)) {
+	if (wl_cfgp2p_check_enabled(wl) && wl_get_p2p_status(wl, IF_ADD)) {
 		WL_DBG(("IF_ADD event called from dongle, old interface name: %s,"
 			"new name: %s\n", ndev->name, wl->p2p->vir_ifname));
 		/* Assign the net device to CONNECT BSSCFG */
@@ -1983,7 +1983,7 @@ wl_run_escan(struct wl_priv *wl, struct net_device *ndev,
 		err = -EINVAL;
 		goto exit;
 	}
-	if (!wl->p2p_supported || !p2p_scan(wl)) {
+	if (!wl_cfgp2p_check_enabled(wl) || !p2p_scan(wl)) {
 		/* LEGACY SCAN TRIGGER */
 		WL_SCAN((" LEGACY E-SCAN START\n"));
 
@@ -2251,7 +2251,7 @@ __wl_cfg80211_scan(struct wiphy *wiphy, struct net_device *ndev,
 				}
 			}
 			if (p2p_ssid) {
-				if (wl->p2p_supported) {
+				if (wl_cfgp2p_check_enabled(wl)) {
 					/* p2p scan trigger */
 					if (p2p_on(wl) == false) {
 						/* p2p on at the first time */
@@ -2269,7 +2269,7 @@ __wl_cfg80211_scan(struct wiphy *wiphy, struct net_device *ndev,
 				/* legacy scan trigger
 				 * So, we have to disable p2p discovery if p2p discovery is on
 				 */
-				if (wl->p2p_supported) {
+				if (wl_cfgp2p_check_enabled(wl)) {
 					p2p_scan(wl) = false;
 					/* If Netdevice is not equals to primary and p2p is on
 					*  , we will do p2p scan using P2PAPI_BSSCFG_DEVICE.
@@ -2286,7 +2286,7 @@ __wl_cfg80211_scan(struct wiphy *wiphy, struct net_device *ndev,
 						}
 					}
 				}
-				if (!wl->p2p_supported || !p2p_scan(wl)) {
+				if (!wl_cfgp2p_check_enabled(wl) || !p2p_scan(wl)) {
 
 					if (wl_cfgp2p_find_idx(wl, ndev, &bssidx) != BCME_OK) {
 						WL_ERR(("Find p2p index from ndev(%p) failed\n",
@@ -2343,7 +2343,7 @@ __wl_cfg80211_scan(struct wiphy *wiphy, struct net_device *ndev,
 		else
 			goto scan_out;
 	} else if (escan_req) {
-		if (wl->p2p_supported) {
+		if (wl_cfgp2p_check_enabled(wl)) {
 			if (p2p_on(wl) && p2p_scan(wl)) {
 
 				/* find my listen channel */
@@ -9591,6 +9591,7 @@ static s32 wl_init_priv(struct wl_priv *wl)
 	set_bit(WL_STATUS_CONNECTED, &wl->interrested_state);
 	set_bit(WL_STATUS_DISCONNECTING, &wl->interrested_state);
 	spin_lock_init(&wl->cfgdrv_lock);
+	spin_lock_init(&wl->cfgp2p_lock);
 	mutex_init(&wl->ioctl_buf_sync);
 	init_waitqueue_head(&wl->netif_change_event);
 	init_waitqueue_head(&wl->event_sync_wq);
@@ -9676,6 +9677,8 @@ s32 wl_cfg80211_attach_post(struct net_device *ndev)
 {
 	struct wl_priv * wl = NULL;
 	s32 err = 0;
+	unsigned long flags;
+
 	WL_TRACE(("In\n"));
 	if (unlikely(!ndev)) {
 		WL_ERR(("ndev is invaild\n"));
@@ -9709,8 +9712,9 @@ s32 wl_cfg80211_attach_post(struct net_device *ndev)
 					return -ENODEV;
 				}
 #endif /* WL_ENABLE_P2P_IF */
-
+				spin_lock_irqsave(&wl->cfgp2p_lock, flags);
 				wl->p2p_supported = true;
+				spin_unlock_irqrestore(&wl->cfgp2p_lock, flags);
 			}
 		}
 	wl_set_drv_status(wl, READY, ndev);
@@ -9819,7 +9823,7 @@ void wl_cfg80211_detach(void *para)
 #ifdef DEBUGFS_CFG80211
 	wl_free_debugfs(wl);
 #endif
-	if (wl->p2p_supported) {
+	if (wl_cfgp2p_check_enabled(wl)) {
 		if (timer_pending(&wl->p2p->listen_timer))
 			del_timer_sync(&wl->p2p->listen_timer);
 		wl_cfgp2p_deinit_priv(wl);
@@ -10490,7 +10494,7 @@ static s32 __wl_cfg80211_down(struct wl_priv *wl)
 		wl->pm_enable_work_on = false;
 	}
 
-	if (wl->p2p_supported) {
+	if (wl_cfgp2p_check_enabled(wl)) {
 		wl_clr_p2p_status(wl, GO_NEG_PHASE);
 #ifdef PROP_TXSTATUS_VSDB
 		if (wl->p2p->vif_created) {
@@ -10547,7 +10551,7 @@ static s32 __wl_cfg80211_down(struct wl_priv *wl)
 	DNGL_FUNC(dhd_cfg80211_down, (wl));
 	wl_flush_eq(wl);
 	wl_link_down(wl);
-	if (wl->p2p_supported)
+	if (wl_cfgp2p_check_enabled(wl))
 		wl_cfgp2p_down(wl);
 	dhd_monitor_uninit();
 
