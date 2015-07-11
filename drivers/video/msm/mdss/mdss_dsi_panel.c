@@ -23,6 +23,7 @@
 #include <linux/err.h>
 
 #include "mdss_dsi.h"
+#include "mdss_livedisplay.h"
 
 #define DT_CMD_HDR 6
 
@@ -286,6 +287,8 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 		mdss_dsi_panel_cmds_send(ctrl, &ctrl->on_cmds);
 
 	pr_info("%s\n", __func__);
+	mdss_livedisplay_update(ctrl, MODE_UPDATE_ALL);
+
 	return 0;
 }
 
@@ -316,7 +319,7 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 	return 0;
 }
 
-static int mdss_dsi_parse_dcs_cmds(struct device_node *np,
+int mdss_dsi_parse_dcs_cmds(struct device_node *np,
 		struct dsi_panel_cmds *pcmds, char *cmd_key, char *link_key)
 {
 	const char *data;
@@ -736,6 +739,8 @@ static int mdss_panel_parse_dt(struct platform_device *pdev,
 
 	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->off_cmds,
 		"qcom,panel-off-cmds", "qcom,off-cmds-dsi-state");
+
+	mdss_livedisplay_parse_dt(np, pinfo);
 
 	return 0;
 
