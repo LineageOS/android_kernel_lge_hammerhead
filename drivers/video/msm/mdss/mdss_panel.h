@@ -253,6 +253,8 @@ struct fbc_panel_info {
 	u32 lossy_mode_idx;
 };
 
+struct mdss_livedisplay_ctx;
+
 struct mdss_panel_info {
 	u32 xres;
 	u32 yres;
@@ -285,6 +287,9 @@ struct mdss_panel_info {
 	struct fbc_panel_info fbc;
 	struct mipi_panel_info mipi;
 	struct lvds_panel_info lvds;
+
+	struct mdss_livedisplay_ctx *livedisplay;
+
 };
 
 struct mdss_panel_data {
