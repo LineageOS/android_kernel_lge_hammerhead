@@ -313,7 +313,6 @@ struct sock *inet_diag_find_one_icsk(struct net *net,
 		return ERR_PTR(-ENOENT);
 
 	if (sock_diag_check_cookie(sk, req->id.idiag_cookie)) {
-		/* NOTE: forward-ports should use sock_gen_put(sk) instead. */
 		if (sk->sk_state == TCP_TIME_WAIT)
 			inet_twsk_put((struct inet_timewait_sock *)sk);
 		else
