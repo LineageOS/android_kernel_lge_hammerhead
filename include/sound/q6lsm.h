@@ -60,6 +60,7 @@ struct lsm_client {
 	uint16_t	connect_to_port;
 	uint16_t	user_sensitivity;
 	uint16_t	kw_sensitivity;
+	bool		opened;
 	uint8_t		num_confidence_levels;
 	uint8_t		*confidence_levels;
 	bool		started;
