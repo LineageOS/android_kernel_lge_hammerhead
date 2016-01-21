@@ -281,7 +281,7 @@ struct sock *inet_diag_find_one_icsk(struct net *net,
 	struct sock *sk;
 
 	if (req->sdiag_family == AF_INET) {
-		sk = inet_lookup(&init_net, hashinfo, req->id.idiag_dst[0],
+		sk = inet_lookup(net, hashinfo, req->id.idiag_dst[0],
 				 req->id.idiag_dport, req->id.idiag_src[0],
 				 req->id.idiag_sport, req->id.idiag_if);
 	}
