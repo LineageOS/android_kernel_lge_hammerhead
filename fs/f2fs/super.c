@@ -40,7 +40,6 @@ static struct kmem_cache *f2fs_inode_cachep;
 static struct kset *f2fs_kset;
 
 #ifdef CONFIG_F2FS_FAULT_INJECTION
-struct f2fs_fault_info f2fs_fault;
 
 char *fault_name[FAULT_MAX] = {
 	[FAULT_KMALLOC]		= "kmalloc",
@@ -50,16 +49,21 @@ char *fault_name[FAULT_MAX] = {
 	[FAULT_BLOCK]		= "no more block",
 	[FAULT_DIR_DEPTH]	= "too big dir depth",
 	[FAULT_EVICT_INODE]	= "evict_inode fail",
+	[FAULT_IO]		= "IO error",
+	[FAULT_CHECKPOINT]	= "checkpoint error",
 };
 
-static void f2fs_build_fault_attr(unsigned int rate)
+static void f2fs_build_fault_attr(struct f2fs_sb_info *sbi,
+						unsigned int rate)
 {
+	struct f2fs_fault_info *ffi = &sbi->fault_info;
+
 	if (rate) {
-		atomic_set(&f2fs_fault.inject_ops, 0);
-		f2fs_fault.inject_rate = rate;
-		f2fs_fault.inject_type = (1 << FAULT_MAX) - 1;
+		atomic_set(&ffi->inject_ops, 0);
+		ffi->inject_rate = rate;
+		ffi->inject_type = (1 << FAULT_MAX) - 1;
 	} else {
-		memset(&f2fs_fault, 0, sizeof(struct f2fs_fault_info));
+		memset(ffi, 0, sizeof(struct f2fs_fault_info));
 	}
 }
 #endif
@@ -86,6 +90,7 @@ enum {
 	Opt_inline_xattr,
 	Opt_inline_data,
 	Opt_inline_dentry,
+	Opt_noinline_dentry,
 	Opt_flush_merge,
 	Opt_noflush_merge,
 	Opt_nobarrier,
@@ -115,6 +120,7 @@ static match_table_t f2fs_tokens = {
 	{Opt_inline_xattr, "inline_xattr"},
 	{Opt_inline_data, "inline_data"},
 	{Opt_inline_dentry, "inline_dentry"},
+	{Opt_noinline_dentry, "noinline_dentry"},
 	{Opt_flush_merge, "flush_merge"},
 	{Opt_noflush_merge, "noflush_merge"},
 	{Opt_nobarrier, "nobarrier"},
@@ -162,7 +168,7 @@ static unsigned char *__struct_ptr(struct f2fs_sb_info *sbi, int struct_type)
 #ifdef CONFIG_F2FS_FAULT_INJECTION
 	else if (struct_type == FAULT_INFO_RATE ||
 					struct_type == FAULT_INFO_TYPE)
-		return (unsigned char *)&f2fs_fault;
+		return (unsigned char *)&sbi->fault_info;
 #endif
 	return NULL;
 }
@@ -307,6 +313,10 @@ static struct attribute *f2fs_attrs[] = {
 	ATTR_LIST(dirty_nats_ratio),
 	ATTR_LIST(cp_interval),
 	ATTR_LIST(idle_interval),
+#ifdef CONFIG_F2FS_FAULT_INJECTION
+	ATTR_LIST(inject_rate),
+	ATTR_LIST(inject_type),
+#endif
 	ATTR_LIST(lifetime_write_kbytes),
 	NULL,
 };
@@ -321,22 +331,6 @@ static struct kobj_type f2fs_ktype = {
 	.sysfs_ops	= &f2fs_attr_ops,
 	.release	= f2fs_sb_release,
 };
-
-#ifdef CONFIG_F2FS_FAULT_INJECTION
-/* sysfs for f2fs fault injection */
-static struct kobject f2fs_fault_inject;
-
-static struct attribute *f2fs_fault_attrs[] = {
-	ATTR_LIST(inject_rate),
-	ATTR_LIST(inject_type),
-	NULL
-};
-
-static struct kobj_type f2fs_fault_ktype = {
-	.default_attrs	= f2fs_fault_attrs,
-	.sysfs_ops	= &f2fs_attr_ops,
-};
-#endif
 
 void f2fs_msg(struct super_block *sb, const char *level, const char *fmt, ...)
 {
@@ -364,10 +358,6 @@ static int parse_options(struct super_block *sb, char *options)
 	substring_t args[MAX_OPT_ARGS];
 	char *p, *name;
 	int arg = 0;
-
-#ifdef CONFIG_F2FS_FAULT_INJECTION
-	f2fs_build_fault_attr(0);
-#endif
 
 	if (!options)
 		return 0;
@@ -417,14 +407,20 @@ static int parse_options(struct super_block *sb, char *options)
 			q = bdev_get_queue(sb->s_bdev);
 			if (blk_queue_discard(q)) {
 				set_opt(sbi, DISCARD);
-			} else {
+			} else if (!f2fs_sb_mounted_blkzoned(sb)) {
 				f2fs_msg(sb, KERN_WARNING,
 					"mounting with \"discard\" option, but "
 					"the device does not support discard");
 			}
 			break;
 		case Opt_nodiscard:
+			if (f2fs_sb_mounted_blkzoned(sb)) {
+				f2fs_msg(sb, KERN_WARNING,
+					"discard is required for zoned block devices");
+				return -EINVAL;
+			}
 			clear_opt(sbi, DISCARD);
+			break;
 		case Opt_noheap:
 			set_opt(sbi, NOHEAP);
 			break;
@@ -483,6 +479,9 @@ static int parse_options(struct super_block *sb, char *options)
 		case Opt_inline_dentry:
 			set_opt(sbi, INLINE_DENTRY);
 			break;
+		case Opt_noinline_dentry:
+			clear_opt(sbi, INLINE_DENTRY);
+			break;
 		case Opt_flush_merge:
 			set_opt(sbi, FLUSH_MERGE);
 			break;
@@ -514,6 +513,13 @@ static int parse_options(struct super_block *sb, char *options)
 				return -ENOMEM;
 			if (strlen(name) == 8 &&
 					!strncmp(name, "adaptive", 8)) {
+				if (f2fs_sb_mounted_blkzoned(sb)) {
+					f2fs_msg(sb, KERN_WARNING,
+						 "adaptive mode is not allowed with "
+						 "zoned block device feature");
+					kfree(name);
+					return -EINVAL;
+				}
 				set_opt_mode(sbi, F2FS_MOUNT_ADAPTIVE);
 			} else if (strlen(name) == 3 &&
 					!strncmp(name, "lfs", 3)) {
@@ -528,7 +534,7 @@ static int parse_options(struct super_block *sb, char *options)
 			if (args->from && match_int(args, &arg))
 				return -EINVAL;
 #ifdef CONFIG_F2FS_FAULT_INJECTION
-			f2fs_build_fault_attr(arg);
+			f2fs_build_fault_attr(sbi, arg);
 #else
 			f2fs_msg(sb, KERN_INFO,
 				"FAULT_INJECTION was not selected");
@@ -613,24 +619,25 @@ static int f2fs_drop_inode(struct inode *inode)
 	return generic_drop_inode(inode);
 }
 
-int f2fs_inode_dirtied(struct inode *inode)
+int f2fs_inode_dirtied(struct inode *inode, bool sync)
 {
 	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
+	int ret = 0;
 
 	spin_lock(&sbi->inode_lock[DIRTY_META]);
 	if (is_inode_flag_set(inode, FI_DIRTY_INODE)) {
-		spin_unlock(&sbi->inode_lock[DIRTY_META]);
-		return 1;
+		ret = 1;
+	} else {
+		set_inode_flag(inode, FI_DIRTY_INODE);
+		stat_inc_dirty_inode(sbi, DIRTY_META);
 	}
-
-	set_inode_flag(inode, FI_DIRTY_INODE);
-	list_add_tail(&F2FS_I(inode)->gdirty_list,
+	if (sync && list_empty(&F2FS_I(inode)->gdirty_list)) {
+		list_add_tail(&F2FS_I(inode)->gdirty_list,
 				&sbi->inode_list[DIRTY_META]);
-	inc_page_count(sbi, F2FS_DIRTY_IMETA);
-	stat_inc_dirty_inode(sbi, DIRTY_META);
+		inc_page_count(sbi, F2FS_DIRTY_IMETA);
+	}
 	spin_unlock(&sbi->inode_lock[DIRTY_META]);
-
-	return 0;
+	return ret;
 }
 
 void f2fs_inode_synced(struct inode *inode)
@@ -642,10 +649,12 @@ void f2fs_inode_synced(struct inode *inode)
 		spin_unlock(&sbi->inode_lock[DIRTY_META]);
 		return;
 	}
-	list_del_init(&F2FS_I(inode)->gdirty_list);
+	if (!list_empty(&F2FS_I(inode)->gdirty_list)) {
+		list_del_init(&F2FS_I(inode)->gdirty_list);
+		dec_page_count(sbi, F2FS_DIRTY_IMETA);
+	}
 	clear_inode_flag(inode, FI_DIRTY_INODE);
 	clear_inode_flag(inode, FI_AUTO_RECOVER);
-	dec_page_count(sbi, F2FS_DIRTY_IMETA);
 	stat_dec_dirty_inode(F2FS_I_SB(inode), DIRTY_META);
 	spin_unlock(&sbi->inode_lock[DIRTY_META]);
 }
@@ -666,7 +675,7 @@ static void f2fs_dirty_inode(struct inode *inode, int flags)
 	if (is_inode_flag_set(inode, FI_AUTO_RECOVER))
 		clear_inode_flag(inode, FI_AUTO_RECOVER);
 
-	f2fs_inode_dirtied(inode);
+	f2fs_inode_dirtied(inode, false);
 }
 
 static void f2fs_i_callback(struct rcu_head *head)
@@ -683,10 +692,6 @@ static void f2fs_destroy_inode(struct inode *inode)
 
 static void destroy_percpu_info(struct f2fs_sb_info *sbi)
 {
-	int i;
-
-	for (i = 0; i < NR_COUNT_TYPE; i++)
-		percpu_counter_destroy(&sbi->nr_pages[i]);
 	percpu_counter_destroy(&sbi->alloc_valid_block_count);
 	percpu_counter_destroy(&sbi->total_valid_inode_count);
 }
@@ -713,7 +718,7 @@ static void f2fs_put_super(struct super_block *sb)
 	 * clean checkpoint again.
 	 */
 	if (is_sbi_flag_set(sbi, SBI_IS_DIRTY) ||
-			!is_set_ckpt_flags(F2FS_CKPT(sbi), CP_UMOUNT_FLAG)) {
+			!is_set_ckpt_flags(sbi, CP_UMOUNT_FLAG)) {
 		struct cp_control cpc = {
 			.reason = CP_UMOUNT,
 		};
@@ -728,7 +733,6 @@ static void f2fs_put_super(struct super_block *sb)
 	 * In addition, EIO will skip do checkpoint, we need this as well.
 	 */
 	release_ino_entry(sbi, true);
-	release_discard_addrs(sbi);
 
 	f2fs_leave_shrinker(sbi);
 	mutex_unlock(&sbi->umount_mutex);
@@ -777,13 +781,17 @@ int f2fs_sync_fs(struct super_block *sb, int sync)
 
 static int f2fs_freeze(struct super_block *sb)
 {
-	int err;
-
 	if (f2fs_readonly(sb))
 		return 0;
 
-	err = f2fs_sync_fs(sb, 1);
-	return err;
+	/* IO error happened before */
+	if (unlikely(f2fs_cp_error(F2FS_SB(sb))))
+		return -EIO;
+
+	/* must be clean, since sync_filesystem() was already called */
+	if (is_sbi_flag_set(F2FS_SB(sb), SBI_IS_DIRTY))
+		return -EINVAL;
+	return 0;
 }
 
 static int f2fs_unfreeze(struct super_block *sb)
@@ -810,7 +818,8 @@ static int f2fs_statfs(struct dentry *dentry, struct kstatfs *buf)
 	buf->f_bavail = user_block_count - valid_user_blocks(sbi);
 
 	buf->f_files = sbi->total_node_count - F2FS_RESERVED_NODE_NUM;
-	buf->f_ffree = buf->f_files - valid_inode_count(sbi);
+	buf->f_ffree = min(buf->f_files - valid_node_count(sbi),
+							buf->f_bavail);
 
 	buf->f_namelen = F2FS_NAME_LEN;
 	buf->f_fsid.val[0] = (u32)id;
@@ -859,6 +868,8 @@ static int f2fs_show_options(struct seq_file *seq, struct dentry *root)
 		seq_puts(seq, ",noinline_data");
 	if (test_opt(sbi, INLINE_DENTRY))
 		seq_puts(seq, ",inline_dentry");
+	else
+		seq_puts(seq, ",noinline_dentry");
 	if (!f2fs_readonly(sbi->sb) && test_opt(sbi, FLUSH_MERGE))
 		seq_puts(seq, ",flush_merge");
 	if (test_opt(sbi, NOBARRIER))
@@ -927,7 +938,7 @@ static int segment_bits_seq_show(struct seq_file *seq, void *offset)
 		seq_printf(seq, "%d|%-3u|", se->type,
 					get_valid_blocks(sbi, i, 1));
 		for (j = 0; j < SIT_VBLOCK_MAP_SIZE; j++)
-			seq_printf(seq, "%x ", se->cur_valid_map[j]);
+			seq_printf(seq, " %.2x", se->cur_valid_map[j]);
 		seq_putc(seq, '\n');
 	}
 	return 0;
@@ -957,9 +968,10 @@ static void default_options(struct f2fs_sb_info *sbi)
 
 	set_opt(sbi, BG_GC);
 	set_opt(sbi, INLINE_DATA);
+	set_opt(sbi, INLINE_DENTRY);
 	set_opt(sbi, EXTENT_CACHE);
 	set_opt(sbi, FLUSH_MERGE);
-	if (f2fs_sb_mounted_hmsmr(sbi->sb)) {
+	if (f2fs_sb_mounted_blkzoned(sbi->sb)) {
 		set_opt_mode(sbi, F2FS_MOUNT_LFS);
 		set_opt(sbi, DISCARD);
 	} else {
@@ -972,6 +984,10 @@ static void default_options(struct f2fs_sb_info *sbi)
 #ifdef CONFIG_F2FS_FS_POSIX_ACL
 	set_opt(sbi, POSIX_ACL);
 #endif
+
+#ifdef CONFIG_F2FS_FAULT_INJECTION
+	f2fs_build_fault_attr(sbi, 0);
+#endif
 }
 
 static int f2fs_remount(struct super_block *sb, int *flags, char *data)
@@ -982,6 +998,9 @@ static int f2fs_remount(struct super_block *sb, int *flags, char *data)
 	bool need_restart_gc = false;
 	bool need_stop_gc = false;
 	bool no_extent_cache = !test_opt(sbi, EXTENT_CACHE);
+#ifdef CONFIG_F2FS_FAULT_INJECTION
+	struct f2fs_fault_info ffi = sbi->fault_info;
+#endif
 
 	/*
 	 * Save the old mount options in case we
@@ -1054,8 +1073,9 @@ static int f2fs_remount(struct super_block *sb, int *flags, char *data)
 	 * or if flush_merge is not passed in mount option.
 	 */
 	if ((*flags & MS_RDONLY) || !test_opt(sbi, FLUSH_MERGE)) {
-		destroy_flush_cmd_control(sbi);
-	} else if (!SM_I(sbi)->cmd_control_info) {
+		clear_opt(sbi, FLUSH_MERGE);
+		destroy_flush_cmd_control(sbi, false);
+	} else {
 		err = create_flush_cmd_control(sbi);
 		if (err)
 			goto restore_gc;
@@ -1077,6 +1097,9 @@ restore_gc:
 restore_opts:
 	sbi->mount_opt = org_mount_opt;
 	sbi->active_logs = active_logs;
+#ifdef CONFIG_F2FS_FAULT_INJECTION
+	sbi->fault_info = ffi;
+#endif
 	return err;
 }
 
@@ -1401,6 +1424,7 @@ int sanity_check_ckpt(struct f2fs_sb_info *sbi)
 	unsigned int total, fsmeta;
 	struct f2fs_super_block *raw_super = F2FS_RAW_SUPER(sbi);
 	struct f2fs_checkpoint *ckpt = F2FS_CKPT(sbi);
+	unsigned int ovp_segments, reserved_segments;
 
 	total = le32_to_cpu(raw_super->segment_count);
 	fsmeta = le32_to_cpu(raw_super->segment_count_ckpt);
@@ -1412,6 +1436,16 @@ int sanity_check_ckpt(struct f2fs_sb_info *sbi)
 	if (unlikely(fsmeta >= total))
 		return 1;
 
+	ovp_segments = le32_to_cpu(ckpt->overprov_segment_count);
+	reserved_segments = le32_to_cpu(ckpt->rsvd_segment_count);
+
+	if (unlikely(fsmeta < F2FS_MIN_SEGMENTS ||
+			ovp_segments == 0 || reserved_segments == 0)) {
+		f2fs_msg(sbi->sb, KERN_ERR,
+			"Wrong layout: check mkfs.f2fs version");
+		return 1;
+	}
+
 	if (unlikely(f2fs_cp_error(sbi))) {
 		f2fs_msg(sbi->sb, KERN_ERR, "A bug case: need to run fsck");
 		return 1;
@@ -1422,6 +1456,7 @@ int sanity_check_ckpt(struct f2fs_sb_info *sbi)
 static void init_sb_info(struct f2fs_sb_info *sbi)
 {
 	struct f2fs_super_block *raw_super = sbi->raw_super;
+	int i;
 
 	sbi->log_sectors_per_block =
 		le32_to_cpu(raw_super->log_sectors_per_block);
@@ -1446,10 +1481,14 @@ static void init_sb_info(struct f2fs_sb_info *sbi)
 	sbi->interval_time[REQ_TIME] = DEF_IDLE_INTERVAL;
 	clear_sbi_flag(sbi, SBI_NEED_FSCK);
 
+	for (i = 0; i < NR_COUNT_TYPE; i++)
+		atomic_set(&sbi->nr_pages[i], 0);
+
 	INIT_LIST_HEAD(&sbi->s_list);
 	mutex_init(&sbi->umount_mutex);
 	mutex_init(&sbi->wio_mutex[NODE]);
 	mutex_init(&sbi->wio_mutex[DATA]);
+	spin_lock_init(&sbi->cp_lock);
 
 #ifdef CONFIG_F2FS_FS_ENCRYPTION
 	memcpy(sbi->key_prefix, F2FS_KEY_DESC_PREFIX,
@@ -1460,13 +1499,7 @@ static void init_sb_info(struct f2fs_sb_info *sbi)
 
 static int init_percpu_info(struct f2fs_sb_info *sbi)
 {
-	int i, err;
-
-	for (i = 0; i < NR_COUNT_TYPE; i++) {
-		err = percpu_counter_init(&sbi->nr_pages[i], 0);
-		if (err)
-			return err;
-	}
+	int err;
 
 	err = percpu_counter_init(&sbi->alloc_valid_block_count, 0);
 	if (err)
@@ -1474,6 +1507,65 @@ static int init_percpu_info(struct f2fs_sb_info *sbi)
 
 	return percpu_counter_init(&sbi->total_valid_inode_count, 0);
 }
+
+#ifdef CONFIG_BLK_DEV_ZONED
+static int init_blkz_info(struct f2fs_sb_info *sbi)
+{
+	struct block_device *bdev = sbi->sb->s_bdev;
+	sector_t nr_sectors = bdev->bd_part->nr_sects;
+	sector_t sector = 0;
+	struct blk_zone *zones;
+	unsigned int i, nr_zones;
+	unsigned int n = 0;
+	int err = -EIO;
+
+	if (!f2fs_sb_mounted_blkzoned(sbi->sb))
+		return 0;
+
+	sbi->blocks_per_blkz = SECTOR_TO_BLOCK(bdev_zone_size(bdev));
+	sbi->log_blocks_per_blkz = __ilog2_u32(sbi->blocks_per_blkz);
+	sbi->nr_blkz = SECTOR_TO_BLOCK(nr_sectors) >>
+		sbi->log_blocks_per_blkz;
+	if (nr_sectors & (bdev_zone_size(bdev) - 1))
+		sbi->nr_blkz++;
+
+	sbi->blkz_type = kmalloc(sbi->nr_blkz, GFP_KERNEL);
+	if (!sbi->blkz_type)
+		return -ENOMEM;
+
+#define F2FS_REPORT_NR_ZONES   4096
+
+	zones = kcalloc(F2FS_REPORT_NR_ZONES, sizeof(struct blk_zone),
+			GFP_KERNEL);
+	if (!zones)
+		return -ENOMEM;
+
+	/* Get block zones type */
+	while (zones && sector < nr_sectors) {
+
+		nr_zones = F2FS_REPORT_NR_ZONES;
+		err = blkdev_report_zones(bdev, sector,
+					  zones, &nr_zones,
+					  GFP_KERNEL);
+		if (err)
+			break;
+		if (!nr_zones) {
+			err = -EIO;
+			break;
+		}
+
+		for (i = 0; i < nr_zones; i++) {
+			sbi->blkz_type[n] = zones[i].type;
+			sector += zones[i].len;
+			n++;
+		}
+	}
+
+	kfree(zones);
+
+	return err;
+}
+#endif
 
 /*
  * Read f2fs raw super block.
@@ -1605,6 +1697,26 @@ try_onemore:
 	sb->s_fs_info = sbi;
 	sbi->raw_super = raw_super;
 
+	/*
+	 * The BLKZONED feature indicates that the drive was formatted with
+	 * zone alignment optimization. This is optional for host-aware
+	 * devices, but mandatory for host-managed zoned block devices.
+	 */
+#ifndef CONFIG_BLK_DEV_ZONED
+	if (f2fs_sb_mounted_blkzoned(sb)) {
+		f2fs_msg(sb, KERN_ERR,
+			 "Zoned block device support is not enabled\n");
+		goto free_sb_buf;
+	}
+#else
+	if (bdev_zoned_model(sb->s_bdev) == BLK_ZONED_HM &&
+	    !f2fs_sb_mounted_blkzoned(sb)) {
+		f2fs_msg(sb, KERN_ERR,
+			 "Zoned block device feature not enabled\n");
+		goto free_sb_buf;
+	}
+#endif
+
 	default_options(sbi);
 	/* parse mount options */
 	options = kstrdup((const char *)data, GFP_KERNEL);
@@ -1691,6 +1803,15 @@ try_onemore:
 	init_extent_cache_info(sbi);
 
 	init_ino_entry_info(sbi);
+
+#ifdef CONFIG_BLK_DEV_ZONED
+	err = init_blkz_info(sbi);
+	if (err) {
+		f2fs_msg(sb, KERN_ERR,
+			"Failed to initialize F2FS blkzone information");
+		goto free_blkz;
+	}
+#endif
 
 	/* setup f2fs internal modules */
 	err = build_segment_manager(sbi);
@@ -1781,13 +1902,16 @@ try_onemore:
 		 * previous checkpoint was not done by clean system shutdown.
 		 */
 		if (bdev_read_only(sb->s_bdev) &&
-				!is_set_ckpt_flags(sbi->ckpt, CP_UMOUNT_FLAG)) {
+				!is_set_ckpt_flags(sbi, CP_UMOUNT_FLAG)) {
 			err = -EROFS;
 			goto free_kobj;
 		}
 
 		if (need_fsck)
 			set_sbi_flag(sbi, SBI_NEED_FSCK);
+
+		if (!retry)
+			goto skip_recovery;
 
 		err = recover_fsync_data(sbi, false);
 		if (err < 0) {
@@ -1806,7 +1930,7 @@ try_onemore:
 			goto free_kobj;
 		}
 	}
-
+skip_recovery:
 	/* recover_fsync_data() cleared this already */
 	clear_sbi_flag(sbi, SBI_POR_DOING);
 
@@ -1850,14 +1974,27 @@ free_root_inode:
 	dput(sb->s_root);
 	sb->s_root = NULL;
 free_node_inode:
+	truncate_inode_pages(NODE_MAPPING(sbi), 0);
 	mutex_lock(&sbi->umount_mutex);
+	release_ino_entry(sbi, true);
 	f2fs_leave_shrinker(sbi);
+	/*
+	 * Some dirty meta pages can be produced by recover_orphan_inodes()
+	 * failed by EIO. Then, iput(node_inode) can trigger balance_fs_bg()
+	 * followed by write_checkpoint() through f2fs_write_node_pages(), which
+	 * falls into an infinite loop in sync_meta_pages().
+	 */
+	truncate_inode_pages(META_MAPPING(sbi), 0);
 	iput(sbi->node_inode);
 	mutex_unlock(&sbi->umount_mutex);
 free_nm:
 	destroy_node_manager(sbi);
 free_sm:
 	destroy_segment_manager(sbi);
+#ifdef CONFIG_BLK_DEV_ZONED
+free_blkz:
+	kfree(sbi->blkz_type);
+#endif
 	kfree(sbi->ckpt);
 free_meta_inode:
 	make_bad_inode(sbi->meta_inode);
@@ -1946,16 +2083,6 @@ static int __init init_f2fs_fs(void)
 		goto free_extent_cache;
 	}
 
-#ifdef CONFIG_F2FS_FAULT_INJECTION
-	f2fs_fault_inject.kset = f2fs_kset;
-	f2fs_build_fault_attr(0);
-	err = kobject_init_and_add(&f2fs_fault_inject, &f2fs_fault_ktype,
-				NULL, "fault_injection");
-	if (err) {
-		f2fs_fault_inject.kset = NULL;
-		goto free_kset;
-	}
-#endif
 	register_shrinker(&f2fs_shrinker_info);
 
 	err = register_filesystem(&f2fs_fs_type);
@@ -1971,11 +2098,6 @@ free_filesystem:
 	unregister_filesystem(&f2fs_fs_type);
 free_shrinker:
 	unregister_shrinker(&f2fs_shrinker_info);
-#ifdef CONFIG_F2FS_FAULT_INJECTION
-free_kset:
-	if (f2fs_fault_inject.kset)
-		kobject_put(&f2fs_fault_inject);
-#endif
 	kset_unregister(f2fs_kset);
 free_extent_cache:
 	destroy_extent_cache();
@@ -1997,9 +2119,6 @@ static void __exit exit_f2fs_fs(void)
 	f2fs_destroy_root_stats();
 	unregister_filesystem(&f2fs_fs_type);
 	unregister_shrinker(&f2fs_shrinker_info);
-#ifdef CONFIG_F2FS_FAULT_INJECTION
-	kobject_put(&f2fs_fault_inject);
-#endif
 	kset_unregister(f2fs_kset);
 	destroy_extent_cache();
 	destroy_checkpoint_caches();
@@ -2015,3 +2134,4 @@ module_exit(exit_f2fs_fs)
 MODULE_AUTHOR("Samsung Electronics's Praesto Team");
 MODULE_DESCRIPTION("Flash Friendly File System");
 MODULE_LICENSE("GPL");
+
