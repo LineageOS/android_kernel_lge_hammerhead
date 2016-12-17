@@ -494,7 +494,7 @@ static int __submit_flush_wait(struct block_device *bdev)
 	int ret;
 
 	bio->bi_bdev = bdev;
-	ret = submit_bio_wait(WRITE_FLUSH, bio);
+	ret = __submit_bio_wait(WRITE_FLUSH, bio);
 	bio_put(bio);
 	return ret;
 }

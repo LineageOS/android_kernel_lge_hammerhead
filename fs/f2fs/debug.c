@@ -17,6 +17,7 @@
 #include <linux/blkdev.h>
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
+#include <linux/module.h>
 
 #include "f2fs.h"
 #include "node.h"
