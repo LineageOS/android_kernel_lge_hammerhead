@@ -424,7 +424,7 @@ static int smb350_get_property(struct power_supply *psy,
 		val->strval = "Summit Microelectronics";
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
-		val->intval = dev->chg_current_ma;
+		val->intval = dev->chg_current_ma * 1000;
 		break;
 	default:
 		pr_err("Invalid prop = %d.\n", psp);
