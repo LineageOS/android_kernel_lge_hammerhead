@@ -292,7 +292,7 @@ typedef struct dhd_info {
 #ifdef DHDTHREAD
 	/* Thread based operation */
 	bool threads_only;
-	struct semaphore sdsem;
+	struct mutex	sdmutex;
 
 	tsk_ctl_t	thr_dpc_ctl;
 	tsk_ctl_t	thr_wdt_ctl;
@@ -1822,7 +1822,7 @@ static int dhd_rx_suspend_again(struct sk_buff *skb)
 #undef ETHER_ICMP6_TYPE
 #undef ETHER_ICMP6_DADDR
 	}
-	return DHD_PACKET_TIMEOUT_MS;
+	return CUSTOM_DHCP_LOCK_xTIME * DHD_PACKET_TIMEOUT_MS;
 }
 #endif
 
@@ -2022,7 +2022,10 @@ dhd_rx_frame(dhd_pub_t *dhdp, int ifidx, void *pktbuf, int numpkt, uint8 chan,
 #ifdef CONFIG_PARTIALRESUME
 			tout_rx |= dhd_rx_suspend_again(skb);
 #else
-			tout_rx = DHD_PACKET_TIMEOUT_MS;
+			if (skb->dev->ieee80211_ptr && skb->dev->ieee80211_ptr->ps == false)
+				tout_rx = CUSTOM_DHCP_LOCK_xTIME * DHD_PACKET_TIMEOUT_MS;
+			else
+				tout_rx = DHD_PACKET_TIMEOUT_MS;
 #endif
 #ifdef DHD_WAKE_STATUS
 			if (unlikely(pkt_wake)) {
@@ -3485,7 +3488,7 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 
 #ifdef DHDTHREAD
 	/* Initialize thread based operation and lock */
-	sema_init(&dhd->sdsem, 1);
+	mutex_init(&dhd->sdmutex);
 	if ((dhd_watchdog_prio >= 0) && (dhd_dpc_prio >= 0)) {
 		dhd->threads_only = TRUE;
 	}
@@ -5354,7 +5357,7 @@ dhd_os_sdlock(dhd_pub_t *pub)
 
 #ifdef DHDTHREAD
 	if (dhd->threads_only)
-		down(&dhd->sdsem);
+		mutex_lock(&dhd->sdmutex);
 	else
 #endif /* DHDTHREAD */
 	spin_lock_bh(&dhd->sdlock);
@@ -5369,7 +5372,7 @@ dhd_os_sdunlock(dhd_pub_t *pub)
 
 #ifdef DHDTHREAD
 	if (dhd->threads_only)
-		up(&dhd->sdsem);
+		mutex_unlock(&dhd->sdmutex);
 	else
 #endif /* DHDTHREAD */
 	spin_unlock_bh(&dhd->sdlock);
