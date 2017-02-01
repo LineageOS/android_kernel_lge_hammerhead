@@ -11,7 +11,6 @@
 #include <linux/fs.h>
 #include <linux/f2fs_fs.h>
 #include <linux/buffer_head.h>
-#include <linux/backing-dev.h>
 #include <linux/writeback.h>
 
 #include "f2fs.h"
@@ -19,11 +18,10 @@
 
 #include <trace/events/f2fs.h>
 
-void f2fs_mark_inode_dirty_sync(struct inode *inode, bool sync)
+void f2fs_mark_inode_dirty_sync(struct inode *inode)
 {
-	if (f2fs_inode_dirtied(inode, sync))
+	if (f2fs_inode_dirtied(inode))
 		return;
-
 	mark_inode_dirty_sync(inode);
 }
 
@@ -44,7 +42,7 @@ void f2fs_set_inode_flags(struct inode *inode)
 		inode->i_flags |= S_NOATIME;
 	if (flags & FS_DIRSYNC_FL)
 		inode->i_flags |= S_DIRSYNC;
-	f2fs_mark_inode_dirty_sync(inode, false);
+	f2fs_mark_inode_dirty_sync(inode);
 }
 
 static void __get_inode_rdev(struct inode *inode, struct f2fs_inode *ri)
@@ -236,24 +234,9 @@ bad_inode:
 	return ERR_PTR(ret);
 }
 
-struct inode *f2fs_iget_retry(struct super_block *sb, unsigned long ino)
-{
-	struct inode *inode;
-retry:
-	inode = f2fs_iget(sb, ino);
-	if (IS_ERR(inode)) {
-		if (PTR_ERR(inode) == -ENOMEM) {
-			congestion_wait(BLK_RW_ASYNC, HZ/50);
-			goto retry;
-		}
-	}
-	return inode;
-}
-
 int update_inode(struct inode *inode, struct page *node_page)
 {
 	struct f2fs_inode *ri;
-	struct extent_tree *et = F2FS_I(inode)->extent_tree;
 
 	f2fs_inode_synced(inode);
 
@@ -269,13 +252,11 @@ int update_inode(struct inode *inode, struct page *node_page)
 	ri->i_size = cpu_to_le64(i_size_read(inode));
 	ri->i_blocks = cpu_to_le64(inode->i_blocks);
 
-	if (et) {
-		read_lock(&et->lock);
-		set_raw_extent(&et->largest, &ri->i_ext);
-		read_unlock(&et->lock);
-	} else {
+	if (F2FS_I(inode)->extent_tree)
+		set_raw_extent(&F2FS_I(inode)->extent_tree->largest,
+							&ri->i_ext);
+	else
 		memset(&ri->i_ext, 0, sizeof(ri->i_ext));
-	}
 	set_raw_inline(inode, ri);
 
 	ri->i_atime = cpu_to_le64(inode->i_atime.tv_sec);
@@ -339,7 +320,7 @@ int f2fs_write_inode(struct inode *inode, struct writeback_control *wbc)
 	 * We need to balance fs here to prevent from producing dirty node pages
 	 * during the urgent cleaning time when runing out of free sections.
 	 */
-	if (update_inode_page(inode) && wbc && wbc->nr_to_write)
+	if (update_inode_page(inode))
 		f2fs_balance_fs(sbi, true);
 	return 0;
 }
@@ -373,12 +354,9 @@ void f2fs_evict_inode(struct inode *inode)
 		goto no_delete;
 
 #ifdef CONFIG_F2FS_FAULT_INJECTION
-	if (time_to_inject(sbi, FAULT_EVICT_INODE))
+	if (time_to_inject(FAULT_EVICT_INODE))
 		goto no_delete;
 #endif
-
-	remove_ino_entry(sbi, inode->i_ino, APPEND_INO);
-	remove_ino_entry(sbi, inode->i_ino, UPDATE_INO);
 
 	set_inode_flag(inode, FI_NO_ALLOC);
 	i_size_write(inode, 0);
@@ -390,8 +368,6 @@ retry:
 		f2fs_lock_op(sbi);
 		err = remove_inode_page(inode);
 		f2fs_unlock_op(sbi);
-		if (err == -ENOENT)
-			err = 0;
 	}
 
 	/* give more chances, if ENOMEM case */
@@ -410,12 +386,10 @@ no_delete:
 	invalidate_mapping_pages(NODE_MAPPING(sbi), inode->i_ino, inode->i_ino);
 	if (xnid)
 		invalidate_mapping_pages(NODE_MAPPING(sbi), xnid, xnid);
-	if (inode->i_nlink) {
-		if (is_inode_flag_set(inode, FI_APPEND_WRITE))
-			add_ino_entry(sbi, inode->i_ino, APPEND_INO);
-		if (is_inode_flag_set(inode, FI_UPDATE_WRITE))
-			add_ino_entry(sbi, inode->i_ino, UPDATE_INO);
-	}
+	if (is_inode_flag_set(inode, FI_APPEND_WRITE))
+		add_ino_entry(sbi, inode->i_ino, APPEND_INO);
+	if (is_inode_flag_set(inode, FI_UPDATE_WRITE))
+		add_ino_entry(sbi, inode->i_ino, UPDATE_INO);
 	if (is_inode_flag_set(inode, FI_FREE_NID)) {
 		alloc_nid_failed(sbi, inode->i_ino);
 		clear_inode_flag(inode, FI_FREE_NID);
@@ -432,18 +406,6 @@ void handle_failed_inode(struct inode *inode)
 {
 	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
 	struct node_info ni;
-
-	/*
-	 * clear nlink of inode in order to release resource of inode
-	 * immediately.
-	 */
-	clear_nlink(inode);
-
-	/*
-	 * we must call this to avoid inode being remained as dirty, resulting
-	 * in a panic when flushing dirty inodes in gdirty_list.
-	 */
-	update_inode_page(inode);
 
 	/* don't make bad inode, since it becomes a regular file. */
 	unlock_new_inode(inode);

@@ -11,7 +11,6 @@
 #include <linux/random.h>
 #include <linux/string.h>
 #include <linux/fscrypto.h>
-#include <linux/mount.h>
 
 static int inode_has_encryption_context(struct inode *inode)
 {
@@ -93,42 +92,26 @@ static int create_encryption_context_from_policy(struct inode *inode,
 	return inode->i_sb->s_cop->set_context(inode, &ctx, sizeof(ctx), NULL);
 }
 
-int fscrypt_process_policy(struct file *filp,
+int fscrypt_process_policy(struct inode *inode,
 				const struct fscrypt_policy *policy)
 {
-	struct inode *inode = file_inode(filp);
-	int ret;
-
-	if (!inode_owner_or_capable(inode))
-		return -EACCES;
-
 	if (policy->version != 0)
 		return -EINVAL;
 
-	ret = mnt_want_write_file(filp);
-	if (ret)
-		return ret;
-
 	if (!inode_has_encryption_context(inode)) {
-		if (!S_ISDIR(inode->i_mode))
-			ret = -EINVAL;
-		else if (!inode->i_sb->s_cop->empty_dir)
-			ret = -EOPNOTSUPP;
-		else if (!inode->i_sb->s_cop->empty_dir(inode))
-			ret = -ENOTEMPTY;
-		else
-			ret = create_encryption_context_from_policy(inode,
-								    policy);
-	} else if (!is_encryption_context_consistent_with_policy(inode,
-								 policy)) {
-		printk(KERN_WARNING
-		       "%s: Policy inconsistent with encryption context\n",
-		       __func__);
-		ret = -EOPNOTSUPP;
+		if (!inode->i_sb->s_cop->empty_dir)
+			return -EOPNOTSUPP;
+		if (!inode->i_sb->s_cop->empty_dir(inode))
+			return -ENOTEMPTY;
+		return create_encryption_context_from_policy(inode, policy);
 	}
 
-	mnt_drop_write_file(filp);
-	return ret;
+	if (is_encryption_context_consistent_with_policy(inode, policy))
+		return 0;
+
+	printk(KERN_WARNING "%s: Policy inconsistent with encryption context\n",
+	       __func__);
+	return -EINVAL;
 }
 EXPORT_SYMBOL(fscrypt_process_policy);
 

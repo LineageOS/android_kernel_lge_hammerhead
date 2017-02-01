@@ -19,12 +19,15 @@
 #include <linux/ratelimit.h>
 #include <linux/fscrypto.h>
 
+static u32 size_round_up(size_t size, size_t blksize)
+{
+	return ((size + blksize - 1) / blksize) * blksize;
+}
+
 /**
- * fname_crypt_complete() - completion callback for filename crypto
- * @req: The asynchronous cipher request context
- * @res: The result of the cipher operation
+ * dir_crypt_complete() -
  */
-static void fname_crypt_complete(struct crypto_async_request *req, int res)
+static void dir_crypt_complete(struct crypto_async_request *req, int res)
 {
 	struct fscrypt_completion_result *ecr = req->data;
 
@@ -35,11 +38,11 @@ static void fname_crypt_complete(struct crypto_async_request *req, int res)
 }
 
 /**
- * fname_encrypt() - encrypt a filename
+ * fname_encrypt() -
  *
- * The caller must have allocated sufficient memory for the @oname string.
- *
- * Return: 0 on success, -errno on failure
+ * This function encrypts the input filename, and returns the length of the
+ * ciphertext. Errors are returned as negative numbers.  We trust the caller to
+ * allocate sufficient memory to oname string.
  */
 static int fname_encrypt(struct inode *inode,
 			const struct qstr *iname, struct fscrypt_str *oname)
@@ -60,9 +63,10 @@ static int fname_encrypt(struct inode *inode,
 	if (iname->len <= 0 || iname->len > lim)
 		return -EIO;
 
-	ciphertext_len = max(iname->len, (u32)FS_CRYPTO_BLOCK_SIZE);
-	ciphertext_len = round_up(ciphertext_len, padding);
-	ciphertext_len = min(ciphertext_len, lim);
+	ciphertext_len = (iname->len < FS_CRYPTO_BLOCK_SIZE) ?
+					FS_CRYPTO_BLOCK_SIZE : iname->len;
+	ciphertext_len = size_round_up(ciphertext_len, padding);
+	ciphertext_len = (ciphertext_len > lim) ? lim : ciphertext_len;
 
 	if (ciphertext_len <= sizeof(buf)) {
 		workbuf = buf;
@@ -83,7 +87,7 @@ static int fname_encrypt(struct inode *inode,
 	}
 	ablkcipher_request_set_callback(req,
 			CRYPTO_TFM_REQ_MAY_BACKLOG | CRYPTO_TFM_REQ_MAY_SLEEP,
-			fname_crypt_complete, &ecr);
+			dir_crypt_complete, &ecr);
 
 	/* Copy the input */
 	memcpy(workbuf, iname->name, iname->len);
@@ -104,22 +108,20 @@ static int fname_encrypt(struct inode *inode,
 	}
 	kfree(alloc_buf);
 	ablkcipher_request_free(req);
-	if (res < 0) {
+	if (res < 0)
 		printk_ratelimited(KERN_ERR
 				"%s: Error (error code %d)\n", __func__, res);
-		return res;
-	}
 
 	oname->len = ciphertext_len;
-	return 0;
+	return res;
 }
 
-/**
- * fname_decrypt() - decrypt a filename
- *
- * The caller must have allocated sufficient memory for the @oname string.
- *
- * Return: 0 on success, -errno on failure
+/*
+ * fname_decrypt()
+ *	This function decrypts the input filename, and returns
+ *	the length of the plaintext.
+ *	Errors are returned as negative numbers.
+ *	We trust the caller to allocate sufficient memory to oname string.
  */
 static int fname_decrypt(struct inode *inode,
 				const struct fscrypt_str *iname,
@@ -147,7 +149,7 @@ static int fname_decrypt(struct inode *inode,
 	}
 	ablkcipher_request_set_callback(req,
 		CRYPTO_TFM_REQ_MAY_BACKLOG | CRYPTO_TFM_REQ_MAY_SLEEP,
-		fname_crypt_complete, &ecr);
+		dir_crypt_complete, &ecr);
 
 	/* Initialize IV */
 	memset(iv, 0, FS_CRYPTO_BLOCK_SIZE);
@@ -169,7 +171,7 @@ static int fname_decrypt(struct inode *inode,
 	}
 
 	oname->len = strnlen(oname->name, iname->len);
-	return 0;
+	return oname->len;
 }
 
 static const char *lookup_table =
@@ -232,8 +234,9 @@ u32 fscrypt_fname_encrypted_size(struct inode *inode, u32 ilen)
 
 	if (ci)
 		padding = 4 << (ci->ci_flags & FS_POLICY_FLAGS_PAD_MASK);
-	ilen = max(ilen, (u32)FS_CRYPTO_BLOCK_SIZE);
-	return round_up(ilen, padding);
+	if (ilen < FS_CRYPTO_BLOCK_SIZE)
+		ilen = FS_CRYPTO_BLOCK_SIZE;
+	return size_round_up(ilen, padding);
 }
 EXPORT_SYMBOL(fscrypt_fname_encrypted_size);
 
@@ -279,10 +282,6 @@ EXPORT_SYMBOL(fscrypt_fname_free_buffer);
 /**
  * fscrypt_fname_disk_to_usr() - converts a filename from disk space to user
  * space
- *
- * The caller must have allocated sufficient memory for the @oname string.
- *
- * Return: 0 on success, -errno on failure
  */
 int fscrypt_fname_disk_to_usr(struct inode *inode,
 			u32 hash, u32 minor_hash,
@@ -291,12 +290,13 @@ int fscrypt_fname_disk_to_usr(struct inode *inode,
 {
 	const struct qstr qname = FSTR_TO_QSTR(iname);
 	char buf[24];
+	int ret;
 
 	if (fscrypt_is_dot_dotdot(&qname)) {
 		oname->name[0] = '.';
 		oname->name[iname->len - 1] = '.';
 		oname->len = iname->len;
-		return 0;
+		return oname->len;
 	}
 
 	if (iname->len < FS_CRYPTO_BLOCK_SIZE)
@@ -306,9 +306,9 @@ int fscrypt_fname_disk_to_usr(struct inode *inode,
 		return fname_decrypt(inode, iname, oname);
 
 	if (iname->len <= FS_FNAME_CRYPTO_DIGEST_SIZE) {
-		oname->len = digest_encode(iname->name, iname->len,
-					   oname->name);
-		return 0;
+		ret = digest_encode(iname->name, iname->len, oname->name);
+		oname->len = ret;
+		return ret;
 	}
 	if (hash) {
 		memcpy(buf, &hash, 4);
@@ -318,18 +318,15 @@ int fscrypt_fname_disk_to_usr(struct inode *inode,
 	}
 	memcpy(buf + 8, iname->name + iname->len - 16, 16);
 	oname->name[0] = '_';
-	oname->len = 1 + digest_encode(buf, 24, oname->name + 1);
-	return 0;
+	ret = digest_encode(buf, 24, oname->name + 1);
+	oname->len = ret + 1;
+	return ret + 1;
 }
 EXPORT_SYMBOL(fscrypt_fname_disk_to_usr);
 
 /**
  * fscrypt_fname_usr_to_disk() - converts a filename from user space to disk
  * space
- *
- * The caller must have allocated sufficient memory for the @oname string.
- *
- * Return: 0 on success, -errno on failure
  */
 int fscrypt_fname_usr_to_disk(struct inode *inode,
 			const struct qstr *iname,
@@ -339,7 +336,7 @@ int fscrypt_fname_usr_to_disk(struct inode *inode,
 		oname->name[0] = '.';
 		oname->name[iname->len - 1] = '.';
 		oname->len = iname->len;
-		return 0;
+		return oname->len;
 	}
 	if (inode->i_crypt_info)
 		return fname_encrypt(inode, iname, oname);
@@ -373,10 +370,10 @@ int fscrypt_setup_filename(struct inode *dir, const struct qstr *iname,
 	if (dir->i_crypt_info) {
 		ret = fscrypt_fname_alloc_buffer(dir, iname->len,
 							&fname->crypto_buf);
-		if (ret)
+		if (ret < 0)
 			return ret;
 		ret = fname_encrypt(dir, iname, &fname->crypto_buf);
-		if (ret)
+		if (ret < 0)
 			goto errout;
 		fname->disk_name.name = fname->crypto_buf.name;
 		fname->disk_name.len = fname->crypto_buf.len;
