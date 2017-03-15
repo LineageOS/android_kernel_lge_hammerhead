@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "ba57610f_e5cd115f",
+        "filename": "fs/exec.c",
+        "patchSetId": 1
+      },
+      "lineNbr": 1291,
+      "author": {
+        "id": 7118
+      },
+      "writtenOn": "2017-03-15T12:27:13Z",
+      "side": 1,
+      "message": "if (task_no_new_privs(current))\n\t\treturn;\nI think this should be added here since it\u0027s part of the if statement being moved. And it\u0027s in the original cve patch.\nref: https://github.com/torvalds/linux/commit/8b01fc86b9f425899f8a3a8fc1c47d73c2c20543",
+      "revId": "62a588aadbffa366068f17c391e0bd9b21535240",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
+      "unresolved": false
+    }
+  ]
+}
