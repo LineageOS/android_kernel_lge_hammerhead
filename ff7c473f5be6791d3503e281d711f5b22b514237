@@ -1,0 +1,27 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "ba57610f_235e8146",
+        "filename": "fs/ext4/namei.c",
+        "patchSetId": 2
+      },
+      "lineNbr": 2056,
+      "author": {
+        "id": 7118
+      },
+      "writtenOn": "2017-03-16T03:56:34Z",
+      "side": 1,
+      "message": "I don\u0027t think this line is part of the change.\nWas added by this one https://android.googlesource.com/kernel/common.git/+/016a3592cc34fa349235b5a8b48af5cece2cbfeb%5E%21/",
+      "range": {
+        "startLine": 2055,
+        "startChar": 38,
+        "endLine": 2056,
+        "endChar": 60
+      },
+      "revId": "ff7c473f5be6791d3503e281d711f5b22b514237",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
+      "unresolved": false
+    }
+  ]
+}
