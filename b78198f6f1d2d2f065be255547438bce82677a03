@@ -1,0 +1,27 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "ba57610f_79f30874",
+        "filename": "include/net/sock.h",
+        "patchSetId": 3
+      },
+      "lineNbr": 330,
+      "author": {
+        "id": 7118
+      },
+      "writtenOn": "2017-03-17T00:04:04Z",
+      "side": 1,
+      "message": "u8_max is not defined in kernel 3.4 so we should use this backport https://goo.gl/dU2HO4",
+      "range": {
+        "startLine": 330,
+        "startChar": 24,
+        "endLine": 330,
+        "endChar": 30
+      },
+      "revId": "b78198f6f1d2d2f065be255547438bce82677a03",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
+      "unresolved": false
+    }
+  ]
+}
