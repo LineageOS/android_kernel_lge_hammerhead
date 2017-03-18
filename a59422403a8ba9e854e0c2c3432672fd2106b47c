@@ -1,0 +1,27 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "ba57610f_3aa33fa0",
+        "filename": "drivers/input/tablet/aiptek.c",
+        "patchSetId": 3
+      },
+      "lineNbr": 1823,
+      "author": {
+        "id": 7118
+      },
+      "writtenOn": "2017-03-18T00:08:11Z",
+      "side": 1,
+      "message": "I think this should be 3.\nhttps://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id\u003d8e20cf2bce122ce9262d6034ee5d5b76fbb92f96\nhttps://git.kernel.org/pub/scm/linux/kernel/git/bwh/linux-3.2.y.git/commit/drivers/input/tablet/aiptek.c?id\u003d90eb3c037fe3f0f25f01713a92725a8daa2b41f3",
+      "range": {
+        "startLine": 1823,
+        "startChar": 11,
+        "endLine": 1823,
+        "endChar": 12
+      },
+      "revId": "a59422403a8ba9e854e0c2c3432672fd2106b47c",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
+      "unresolved": false
+    }
+  ]
+}
