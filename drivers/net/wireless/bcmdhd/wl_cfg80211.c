@@ -5300,6 +5300,8 @@ wl_cfg80211_set_channel(struct wiphy *wiphy, struct net_device *dev,
 	} else if (chan->band == IEEE80211_BAND_2GHZ)
 		bw = WL_CHANSPEC_BW_20;
 set_channel:
+    	//NexMon: force channel with to 40 (only works for 5 GHz for now)
+    	bw = WL_CHANSPEC_BW_40;
 	chspec = wf_channel2chspec(_chan, bw);
 	if (wf_chspec_valid(chspec)) {
 		fw_chspec = wl_chspec_host_to_driver(chspec);
