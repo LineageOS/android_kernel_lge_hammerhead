@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "911467c6_09e75187",
+        "filename": "net/xfrm/xfrm_user.c",
+        "patchSetId": 1
+      },
+      "lineNbr": 1525,
+      "author": {
+        "id": 5259
+      },
+      "writtenOn": "2018-05-30T20:52:18Z",
+      "side": 1,
+      "message": "Oops",
+      "revId": "513dca7507a90dc7ea716f6fd754a3cb3ebff185",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
+      "unresolved": false
+    }
+  ]
+}
