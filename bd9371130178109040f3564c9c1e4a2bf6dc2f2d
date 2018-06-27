@@ -52,6 +52,24 @@
       "revId": "bd9371130178109040f3564c9c1e4a2bf6dc2f2d",
       "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
       "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "75b1c9c7_fa35a23d",
+        "filename": "fs/namespace.c",
+        "patchSetId": 1
+      },
+      "lineNbr": 745,
+      "author": {
+        "id": 13026
+      },
+      "writtenOn": "2018-06-27T06:31:26Z",
+      "side": 1,
+      "message": "Looking at upstream (https://android.googlesource.com/kernel/msm/+/70c8b04dc820), they have it included (https://android.googlesource.com/kernel/msm/+/70c8b04dc820/fs/namespace.c#832). Not sure why it\u0027s missing here; I did pick these changes via other 3.4 trees.\n\nWe should amend it in then.",
+      "parentUuid": "251a373a_5933ebb9",
+      "revId": "bd9371130178109040f3564c9c1e4a2bf6dc2f2d",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
+      "unresolved": false
     }
   ]
 }
