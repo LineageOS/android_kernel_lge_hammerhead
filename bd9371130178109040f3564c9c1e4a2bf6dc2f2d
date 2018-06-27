@@ -16,6 +16,24 @@
       "revId": "bd9371130178109040f3564c9c1e4a2bf6dc2f2d",
       "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
       "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "7f943f34_f9518476",
+        "filename": "fs/namespace.c",
+        "patchSetId": 1
+      },
+      "lineNbr": 745,
+      "author": {
+        "id": 13026
+      },
+      "writtenOn": "2018-06-27T05:50:41Z",
+      "side": 1,
+      "message": "This is about GCC 4.9, right? Isn\u0027t https://review.lineageos.org/218344 fixing it?",
+      "parentUuid": "ef37a4df_0d9405f6",
+      "revId": "bd9371130178109040f3564c9c1e4a2bf6dc2f2d",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
+      "unresolved": false
     }
   ]
 }
