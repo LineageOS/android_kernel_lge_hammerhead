@@ -22,6 +22,30 @@
       "revId": "6603624805002222550e3633ff9ac918667d7e78",
       "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
       "unresolved": true
+    },
+    {
+      "key": {
+        "uuid": "d3d01405_090e2639",
+        "filename": "arch/arm/configs/lineageos_hammerhead_defconfig",
+        "patchSetId": 1
+      },
+      "lineNbr": 156,
+      "author": {
+        "id": 21793
+      },
+      "writtenOn": "2019-08-08T10:48:32Z",
+      "side": 1,
+      "message": "NETFILTER_XT_TARGET_CT was needed for the tethering.",
+      "parentUuid": "1835a1bb_8897c83b",
+      "range": {
+        "startLine": 155,
+        "startChar": 0,
+        "endLine": 156,
+        "endChar": 31
+      },
+      "revId": "6603624805002222550e3633ff9ac918667d7e78",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
+      "unresolved": true
     }
   ]
 }
