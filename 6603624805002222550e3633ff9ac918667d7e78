@@ -46,6 +46,30 @@
       "revId": "6603624805002222550e3633ff9ac918667d7e78",
       "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
       "unresolved": true
+    },
+    {
+      "key": {
+        "uuid": "736179b4_d05f179c",
+        "filename": "arch/arm/configs/lineageos_hammerhead_defconfig",
+        "patchSetId": 1
+      },
+      "lineNbr": 156,
+      "author": {
+        "id": 7118
+      },
+      "writtenOn": "2019-08-08T16:50:16Z",
+      "side": 1,
+      "message": "They can be removed because they\u0027re already being set to y by other options below. Hammerhead uses a minimal (savedefconfig) configuration.\nhttps://github.com/LineageOS/android_kernel_lge_hammerhead/blob/6603624805002222550e3633ff9ac918667d7e78/net/netfilter/Kconfig#L684\nhttps://github.com/LineageOS/android_kernel_lge_hammerhead/blob/6603624805002222550e3633ff9ac918667d7e78/net/ipv6/netfilter/Kconfig#L141",
+      "parentUuid": "d3d01405_090e2639",
+      "range": {
+        "startLine": 155,
+        "startChar": 0,
+        "endLine": 156,
+        "endChar": 31
+      },
+      "revId": "6603624805002222550e3633ff9ac918667d7e78",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
+      "unresolved": true
     }
   ]
 }
